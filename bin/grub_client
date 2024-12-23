@@ -11,16 +11,16 @@ Options:\n\
   -h | --help    : print this usage information\n\
 Example:\n\
   To run a git remote user build, synchronizing the git repo asmdio under \$HOME/Documents/Development\n\
-   to /u/mfulton/development on the ssh host mfulton_aqts\n\
-   and then run the remote build program /u/mfulton/tools/grub/bin/grub_server using the remote 'git' at /usr/lpp/IBM/foz/v1r1\n\
-  grub_client \$HOME/Documents/Development /u/mfulton/development mfulton_aqts asmdio /u/mfulton/grub/bin/grub_server /usr/lpp/IBM/foz/v1r1/bin\n\
+   to /u/fultonm/development on the ssh host fultonm_zos\n\
+   and then run the remote build program /u/fultonm/tools/grub/bin/grub_server using the remote 'git' at /usr/lpp/IBM/foz/v1r1\n\
+  grub_client \$HOME/Documents/Development /u/fultonm/development fultonm_zos asmdio /u/fultonm/grub/bin/grub_server /usr/lpp/IBM/foz/v1r1/bin\n\
 where:\n\
   0: this program      grub_client\n\
   1: client_root       \$HOME/Documents/Development\n\
-  2: server_root       /u/mfulton/development\n\
-  3: server            mfulton_aqts\n\
+  2: server_root       /u/fultonm/development\n\
+  3: server            fultonm_zos\n\
   4: repo              asmdio\n\
-  5: server_build_tool /u/mfulton/grub/bin/grub_server\n\
+  5: server_build_tool /u/fultonm/grub/bin/grub_server\n\
   6: server_git_dir    /usr/lpp/IBM/foz/v1r1/bin\n\
 Note:\n\
   grub_client uses git and ssh to communicate with the remote server.\n\

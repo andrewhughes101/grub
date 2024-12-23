@@ -1,6 +1,6 @@
 {
   "grub.server_root": "'$HOME/projects'",
-  "grub.server": "mfulton_aqts",
+  "grub.server": "fultonm_zos",
   "grub.client_build_tool": "'$HOME/Development/tools/grub/bin/grub_client/'",
   "grub.server_build_tool": "'$HOME/tools/grub/bin/grub_server'",
   "grub.server_git_dir": "/usr/lpp/IBM/foz/v1r1/bin"
