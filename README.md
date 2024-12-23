@@ -26,7 +26,9 @@ On your Mac:
 On your Mac, set up VSCode default build (Optional):
 
 - Launch VSCode
-- For each repository that you want to run *GRUB* on:
+- If you want to use *GRUB* on **multiple repositories**, you can set up a *User task* with `Cmd-Shift-P`, then choose *Open User Tasks* to create a user level task. Copy the sample [tasks.json](sample/tasks.json) into the *tasks.json* file that is available 
+across all folders and workspaces.
+- If you only want to run *GRUB* on **one repository**:
   - Copy the sample [tasks.json](sample/tasks.json) into the *.vscode* directory of your repository. You may need to create the *.vscode* directory if you haven't done any VSCode customization of your repository yet.
   - `Cmd-Shift-P` to bring up preferences, then choose *Tasks: Configure default build task* and choose GRUB as the default build task. You should be able to use this task as-is.
   The task gets the GRUB variables from your preferences and combines it with some parameters it determines, such as the client directory and repo, and then calls the `grub_client` script.
