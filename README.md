@@ -27,12 +27,12 @@ On your Mac, set up VSCode default build (Optional):
 
 - Launch VSCode
 - For each repository that you want to run *grub* on:
-  - Copy the sample [tasks.json](sample/tasks.json) into the root directory of your repository.
-  - Cmd-Shift-P to bring up preferences, then choose *Tasks: Configure default build task* and choose GRUB as the default build task. You should be able to use this task as-is.
+  - Copy the sample [tasks.json](sample/tasks.json) into the *.vscode* directory of your repository. You may need to create the *.vscode* directory if you haven't done any VSCode customization of your repository yet.
+  - `Cmd-Shift-P` to bring up preferences, then choose *Tasks: Configure default build task* and choose GRUB as the default build task. You should be able to use this task as-is.
   The task gets the GRUB variables from your preferences and combines it with some parameters it determines, such as the client directory and repo, and then calls the `grub_client` script.
 - Set your GRUB variables for VSCode
   - Copy the contents of [grub_variables.json](sample/grub_variables.json) into the clipboard (`Cmd-a` then `Cmd-c`)
-  - Cmd-Shift-P to bring up preferences, then choose *Tasks: Open User Settings (JSON)* and paste the variables into your user settings file. You will need to edit the variables to reflect the parameters you want to pass to `grub_client`
+  - `Cmd-Shift-P` to bring up preferences, then choose *Tasks: Open User Settings (JSON)* and paste the variables into your user settings file. You will need to edit the variables to reflect the parameters you want to pass to `grub_client`
     - *grub.server_root* is the root directory on your z/OS system that you want to clone your repository to.
     - *grub.server* is the ssh `Host` specification. See *ssh host specification* below for more details.
     - *grub.client_build_tool* is the absolute path to [grub_client](bin/grub_client) on your Desktop.
