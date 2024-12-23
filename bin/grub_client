@@ -11,21 +11,20 @@ Options:\n\
   -h | --help    : print this usage information\n\
 Example:\n\
   To run a git remote user build, synchronizing the git repo asmdio under \$HOME/Documents/Development\n\
-   to \$HOME/development on the ssh host mfulton_aqts\n\
-   and then run the remote build program \$HOME/tools/grub/bin/grub_server using the remote 'git' at /usr/lpp/IBM/foz/v1r1\n\
-  grub_client \$HOME/Documents/Development '\$HOME/development' mfulton_aqts asmdio '\$HOME/grub/bin/grub_server' /usr/lpp/IBM/foz/v1r1/bin\n\
+   to /u/mfulton/development on the ssh host mfulton_aqts\n\
+   and then run the remote build program /u/mfulton/tools/grub/bin/grub_server using the remote 'git' at /usr/lpp/IBM/foz/v1r1\n\
+  grub_client \$HOME/Documents/Development /u/mfulton/development mfulton_aqts asmdio /u/mfulton/grub/bin/grub_server /usr/lpp/IBM/foz/v1r1/bin\n\
 where:\n\
   0: this program      grub_client\n\
   1: client_root       \$HOME/Documents/Development\n\
-  2: server_root       \$HOME/development\n\
+  2: server_root       /u/mfulton/development\n\
   3: server            mfulton_aqts\n\
   4: repo              asmdio\n\
-  5: server_build_tool \$HOME/grub/bin/grub_server\n\
+  5: server_build_tool /u/mfulton/grub/bin/grub_server\n\
   6: server_git_dir    /usr/lpp/IBM/foz/v1r1/bin\n\
 Note:\n\
   grub_client uses git and ssh to communicate with the remote server.\n\
   ssh should be configured with a public/private key and use a Host specification that includes at least a HostName and User specification.\n\
-  Make sure to specify single-quotes around your \$HOME environment variable used on z/OS\n\
 " >&2
 }
 
@@ -50,7 +49,7 @@ vecho()
   fi
 }
 
-#set -x
+set -x
 
 if [ "$1" = "-v" ] || [ "$1" = "verbose" ]; then
   verbose=True
@@ -83,6 +82,15 @@ fi
 
 vecho "Start:" $(date)
 seconds_start=$(date '+%s')
+
+url=$(git config --get "remote.${server}_${repo}.url")
+if [ "${url}" = '' ]; then
+  git remote add "${server}_${repo}" "${server}:${server_root}/${repo}"
+  if [ $? -gt 0 ]; then
+    echo "Unable to set url for ${server}_${repo}" >&2
+    exit 4
+  fi
+fi
 
 uploadpack=$(git config --get "remote.${server}_${repo}.uploadpack")
 if [ "${uploadpack}" = '' ]; then
