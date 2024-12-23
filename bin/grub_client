@@ -1,0 +1,222 @@
+#!/bin/sh
+
+# grub_client: grub --help for syntax
+
+syntax()
+{
+  echo "\
+Usage: grub_client [options] <client root> <server root> <server> <repo> <server build tool> <server git dir>\n\
+Options:\n\
+  -v | --verbose : print verbose output\n\
+  -h | --help    : print this usage information\n\
+Example:\n\
+  To run a git remote user build, synchronizing the git repo asmdio under \$HOME/Documents/Development\n\
+   to \$HOME/development on the ssh host mfulton_aqts\n\
+   and then run the remote build program \$HOME/tools/grub/bin/grub_server using the remote 'git' at /usr/lpp/IBM/foz/v1r1\n\
+  grub_client \$HOME/Documents/Development '\$HOME/development' mfulton_aqts asmdio '\$HOME/grub/bin/grub_server' /usr/lpp/IBM/foz/v1r1/bin\n\
+where:\n\
+  0: this program      grub_client\n\
+  1: client_root       \$HOME/Documents/Development\n\
+  2: server_root       \$HOME/development\n\
+  3: server            mfulton_aqts\n\
+  4: repo              asmdio\n\
+  5: server_build_tool \$HOME/grub/bin/grub_server\n\
+  6: server_git_dir    /usr/lpp/IBM/foz/v1r1/bin\n\
+Note:\n\
+  grub_client uses git and ssh to communicate with the remote server.\n\
+  ssh should be configured with a public/private key and use a Host specification that includes at least a HostName and User specification.\n\
+  Make sure to specify single-quotes around your \$HOME environment variable used on z/OS\n\
+" >&2
+}
+
+reset_head()
+{
+  commit=$1
+
+  # switch back to original before commit if changes made
+  if [ $commit -eq 1 ]; then
+    git reset 'HEAD^1' >/dev/null
+    if [ $? -gt 0 ]; then
+      echo "Problems trying to reset ${active_branch} to undo dummy 'commit'. Use git log to see what happened." >&2
+      exit 4
+    fi
+  fi
+}
+
+vecho()
+{
+  if ${verbose}; then
+    echo "$*"
+  fi
+}
+
+#set -x
+
+if [ "$1" = "-v" ] || [ "$1" = "verbose" ]; then
+  verbose=True
+  shift 1
+else
+  verbose=False
+fi
+
+client_root=$1
+server_root=$2
+server=$3
+repo=$4
+remote_build_tool=$5
+remote_git_dir=$6
+
+if [[ $# -ne 6 ]]; then
+  syntax
+  exit 4
+fi
+
+if ! [ -d "${client_root}" ]; then
+  echo "${client_root} is not a directory." >&2
+  exit 8
+fi
+
+if ! cd "${client_root}" ; then
+  echo "Unable to change into ${client_root}/${repo} directory." >&2
+  exit 8
+fi
+
+vecho "Start:" $(date)
+seconds_start=$(date '+%s')
+
+uploadpack=$(git config --get "remote.${server}_${repo}.uploadpack")
+if [ "${uploadpack}" = '' ]; then
+  git config --add "remote.${server}_${repo}.uploadpack" "${remote_git_dir}/git-upload-pack"
+  if [ $? -gt 0 ]; then
+    echo "Unable to add configuration for remote.${server}_${repo}.uploadpack" >&2
+    exit 4
+  fi
+fi
+receivepack=$(git config --get "remote.${server}_${repo}.receivepack")
+if [ "${receivepack}" = '' ]; then
+  git config --add "remote.${server}_${repo}.receivepack" "${remote_git_dir}/git-receive-pack"
+  if [ $? -gt 0 ]; then
+    echo "Unable to add configuration for remote.${server}_${repo}.receive-pack" >&2
+    exit 4
+  fi
+fi
+
+active_branch=$(git rev-parse --abbrev-ref HEAD)
+if [ $? -gt 0 ]; then
+  echo "Unable to determine current local branch" >&2
+  exit 8
+fi
+
+#
+# Add any uncommitted changes to active_branch
+#
+git add .
+if [ $? -gt 0 ]; then
+  echo "Problems trying to add to ${active_branch}" >&2
+  exit 4
+fi
+git commit -m 'temporary commit' >/dev/null
+
+#
+# Could get a '1' indicating nothing to commit - this is not an error
+#
+
+#
+# msf - If you are not using fast-forwarding, you may have to do a force-lease
+# to publish your changes to github.ibm.com
+# If you want to avoid this and are ok with it, you can do:
+#   git config pull.ff true
+# to specify fast-forwarding.
+# You can also do it globally if you want, e.g.
+#   git config --global pull.ff true
+# See: https://thelinuxcode.com/use-pull-rebase-false-pull-ff-true-git/ 
+
+if [ $? -gt 1 ]; then
+  echo "Problems trying to commit files to ${active_branch}" >&2
+  exit 4
+fi
+
+if [ $? -eq 0 ]; then
+  commit=1
+else
+  commit=0
+fi
+
+seconds_commit=$(date '+%s')
+
+git remote set-branches "${server}_${repo}" "${active_branch}" >/dev/null
+if [ $? -gt 0 ]; then
+  echo "Set up repository ${repo} on ${server_root}"
+  ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_git_dir}/git init && ${remote_git_dir}/git config --local receive.denyCurrentBranch updateInstead"
+  # need this too... git remote add mfulton_aqts_asmdio mfulton_aqts:/u/mfulton/asmdio 
+  # could also set up git config automatically rather than make people fill it in since we have the remote git name now
+  git remote set-branches "${server}_${repo}" "${active_branch}" >/dev/null
+  if [ $? -gt 1 ]; then
+    reset_head ${commit}
+    exit 4
+  fi
+fi
+
+#
+# The force is required because we may have reset the head one or more times
+#
+vecho "Synchronize changes to ${server}"
+
+git push -q --force --set-upstream "${server}_${repo}" >/dev/null 2>/tmp/err
+if [ $? -gt 0 ]; then
+  echo "Failed to synchronize with remote repo: ${server}_${repo}" >&2
+  reset_head ${commit}
+  exit 4
+fi
+
+seconds_sync=$(date '+%s')
+
+vecho "Repository synchronized:" $(date)
+
+vecho "Run build ${remote_build_tool} on ${server} in directory ${server_root}"
+
+bld_err="/tmp/grub.${server}_${repo}.err"
+bld_out="/tmp/grub.${server}_${repo}.out"
+ssh "${server}" ${remote_build_tool} "${server_root} ${repo} ${active_branch} ${bld_out} ${bld_err}"
+if [ $? -gt 0 ]; then
+  echo "ssh command <ssh ${server} ${remote_build_tool} ${server_root} ${repo} ${active_branch} ${bld_out} ${bld_err}> failed.\n" >&2
+fi
+
+seconds_build=$(date '+%s')
+
+vecho "Build complete:" $(date)
+
+#
+# Run the SFTP's in the background so they can process in parallel
+#
+bldout_err=$(sftp "${server}:${bld_out}" /tmp 2>&1) &
+pid_out=$!
+blderr_err=$(sftp "${server}:${bld_err}" /tmp 2>&1) &
+pid_err=$!
+wait ${pid_out} ${pid_err} # put the specific jobs in so that the RC will get set if the last command fails
+rc=$?
+if [ $rc -gt 0 ]; then
+  echo "SFTP failed to download one or both of ${bld_out} and ${bld_err} from ${server}. rc ${rc}" >&2
+  echo "${bldout_err}" >&2
+  echo "${blderr_err}" >&2
+  exit 4
+fi
+
+seconds_download=$(date '+%s')
+
+echo "Output downloaded to ${bld_out}"
+echo "Errors downloaded to ${bld_err}"
+
+reset_head ${commit}
+
+seconds_reset=$(date '+%s')
+
+vecho "Finish:" $(date)
+
+vecho "Times: "
+vecho " git commit:   " $((seconds_commit-$seconds_start)) "s"
+vecho " git sync:     " $((seconds_sync-$seconds_commit)) "s"
+vecho " remote build: " $((seconds_build-$seconds_sync)) "s"
+vecho " download:     " $((seconds_download-$seconds_build)) "s"
+vecho " reset:        " $((seconds_reset-$seconds_download)) "s"
+vecho "Total time:    " $((seconds_reset-$seconds_start)) "s"

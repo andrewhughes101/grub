@@ -1,0 +1,16 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "GRUB",
+			"type": "shell",
+			"command": "${config:grub.client_build_tool} ${workspaceFolder} ${config:grub.server_root} ${config:grub.server} ${fileWorkspaceFolderBasename} ${config:grub.server_build_tool} ${config:grub.server_git_dir}",
+			
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": []
+		}
+	]
+}
