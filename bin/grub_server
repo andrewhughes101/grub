@@ -31,4 +31,4 @@ export _TAG_REDIR_OUT=txt
 # redirect the stdout and stderr to files so the client 
 # can then download the output
 #
-bash "${MYDIR}/zbuild_server.bash" "${server_root}" "${repo}" "${active_branch}" >"${bld_out}" 2>"${bld_err}"
+bash "${MYDIR}/grub_server.bash" "${server_root}" "${repo}" "${active_branch}" >"${bld_out}" 2>"${bld_err}"
