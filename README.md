@@ -44,6 +44,23 @@ On your z/OS userid:
 - `cd $HOME/tools`
 - `git clone git@github.com:MikeFultonDev/grub.git`
 
+## Running grub from the command-line
+
+- After installation, you can run the GRUB client:
+  - by adding the GRUB `bin` directory to your PATH and then issuing: `grub_client <parameters>`
+  - by running `grub_client` directly, e.g. `<grub-directory>/grub_client <parameters>`
+- This will perform the following steps:
+  - use *git* to synchronize the files to the server
+  - run the remote build process on the server
+  - transfer the output and errors to temporary files on your desktop
+
+## Running grub from VSCode
+
+- After installation
+  - Open a file from the repository you want to build in VSCode
+  - On a Mac, `Cmd-Shift-B` will launch the build and you can see the results in the terminal.
+  - On completion, you can hover over the output file name or the error file name, `Cmd-Left-Click` and the file will be shown in your editor.
+
 ## ssh host specification
 
 GRUB uses an ssh Host specification to describe the userid and server to connect to. GRUB requires that the ssh `Host` specification includes at least a `HostName` and `User` specification, defined in your `.ssh/config` file in your `$HOME` directory. For example, if you wanted to create a host called `fultonm_zos`, where your userid is `fultonm`, and your server is `zos.ibm.com`, then you would have a section in your `.ssh/config` file as follows:
@@ -54,5 +71,5 @@ Host fultonm_zos
   User fultonm
 ```
 
-It is strongly recommended that you configure a public/private key for communicating with the 
+It is strongly recommended that you configure a public/private key for communicating with the
 server so that you won't be prompted for a password when connecting to the server.
