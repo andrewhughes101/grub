@@ -2,11 +2,11 @@
 
 The git remote user build requires code on both the client and server, consisting of:
 
-- [GRUB_client](bin/GRUB_client): a script to drive a git remote user build from your desktop.
-- [GRUB_server](bin/GRUB_server): a script driven by *GRUB_client* on the target server.
-- [GRUB_server.bash](bin/GRUB_server.bash): a helper script driven by *GRUB_server* on the target server.
+- [grub_client](bin/grub_client): a script to drive a git remote user build from your desktop.
+- [grub_server](bin/grub_server): a script driven by *GRUB_client* on the target server.
+- [grub_server.bash](bin/grub_server.bash): a helper script driven by *GRUB_server* on the target server.
 - [tasks.json](sample/tasks.json): a sample *tasks.json* that you can optionally use for a VSCode repository build task.
-- [GRUB_variables.json](sample/GRUB_variables.json): a sample set of environment variables that you can optionally set up for a VSCode repository build task.
+- [grub_variables.json](sample/grub_variables.json): a sample set of environment variables that you can optionally set up for a VSCode repository build task.
 
 ## Installation
 
@@ -20,8 +20,8 @@ For example:
 On your Mac:
 
 - `cd $HOME/Documents/tools`
-- `git clone git@github.com:MikeFultonDev/GRUB.git`
-- Run `$HOME/Documents/tools/bin/GRUB_client` with no parameters to see the syntax of `GRUB_client`
+- `git clone git@github.com:MikeFultonDev/grub.git`
+- Run `$HOME/Documents/tools/bin/grub_client` with no parameters to see the syntax of `grub_client`
 
 On your Mac, set up VSCode default build (Optional):
 
@@ -29,26 +29,26 @@ On your Mac, set up VSCode default build (Optional):
 - For each repository that you want to run *GRUB* on:
   - Copy the sample [tasks.json](sample/tasks.json) into the *.vscode* directory of your repository. You may need to create the *.vscode* directory if you haven't done any VSCode customization of your repository yet.
   - `Cmd-Shift-P` to bring up preferences, then choose *Tasks: Configure default build task* and choose GRUB as the default build task. You should be able to use this task as-is.
-  The task gets the GRUB variables from your preferences and combines it with some parameters it determines, such as the client directory and repo, and then calls the `GRUB_client` script.
+  The task gets the GRUB variables from your preferences and combines it with some parameters it determines, such as the client directory and repo, and then calls the `grub_client` script.
 - Set your GRUB variables for VSCode
-  - Copy the contents of [GRUB_variables.json](sample/GRUB_variables.json) into the clipboard (`Cmd-a` then `Cmd-c`)
-  - `Cmd-Shift-P` to bring up preferences, then choose *Tasks: Open User Settings (JSON)* and paste the variables into your user settings file. You will need to edit the variables to reflect the parameters you want to pass to `GRUB_client`
-    - *GRUB.server_root* is the root directory on your z/OS system that you want to clone your repository to.
-    - *GRUB.server* is the ssh `Host` specification. See *ssh host specification* below for more details.
-    - *GRUB.client_build_tool* is the absolute path to [GRUB_client](bin/GRUB_client) on your Desktop.
-    - *GRUB.server_build_tool* is the absolute path to [GRUB_server](bin/GRUB_server) on your server.
-    - *GRUB.server_git_dir* is the absolute path to the `git` program on your server.
+  - Copy the contents of [grub_variables.json](sample/grub_variables.json) into the clipboard (`Cmd-a` then `Cmd-c`)
+  - `Cmd-Shift-P` to bring up preferences, then choose *Tasks: Open User Settings (JSON)* and paste the variables into your user settings file. You will need to edit the variables to reflect the parameters you want to pass to `grub_client`
+    - *grub.server_root* is the root directory on your z/OS system that you want to clone your repository to.
+    - *grub.server* is the ssh `Host` specification. See *ssh host specification* below for more details.
+    - *grub.client_build_tool* is the absolute path to [grub_client](bin/grub_client) on your Desktop.
+    - *grub.server_build_tool* is the absolute path to [grub_server](bin/grub_server) on your server.
+    - *grub.server_git_dir* is the absolute path to the `git` program on your server.
 
 On your z/OS userid:
 
 - `cd $HOME/tools`
-- `git clone git@github.com:MikeFultonDev/GRUB.git`
+- `git clone git@github.com:MikeFultonDev/grub.git`
 
 ## Running GRUB from the command-line
 
 - After installation, you can run the GRUB client:
-  - by adding the GRUB `bin` directory to your PATH and then issuing: `GRUB_client <parameters>`
-  - by running `GRUB_client` directly, e.g. `<GRUB-directory>/GRUB_client <parameters>`
+  - by adding the GRUB `bin` directory to your PATH and then issuing: `grub_client <parameters>`
+  - by running `grub_client` directly, e.g. `<GRUB-directory>/grub_client <parameters>`
 - This will perform the following steps:
   - use *git* to synchronize the files to the server
   - run the remote build process on the server
