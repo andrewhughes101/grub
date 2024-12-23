@@ -58,7 +58,7 @@ On your z/OS userid:
 
 - After installation
   - Open a file from the repository you want to build in VSCode
-  - On a Mac, `Cmd-Shift-B` will launch the build and you can see the results in the terminal.
+  - On a Mac, `Cmd-Shift-B` will launch the build and you can see the results in the terminal, as described in *Running grub from the command-line*.
   - On completion, you can hover over the output file name or the error file name, `Cmd-Left-Click` and the file will be shown in your editor.
 
 ## ssh host specification
