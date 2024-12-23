@@ -168,8 +168,8 @@ fi
 #
 vecho "Synchronize changes to ${server}"
 
-git push -q --force --set-upstream "${server}_${repo}" >/dev/null 2>/tmp/err
-if [ $? -gt 0 ]; then
+git push --force --set-upstream "${server}_${repo}" >/dev/null 2>/tmp/err
+if [ $? -gt 1 ]; then
   echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
   ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_git_dir}/git init && ${remote_git_dir}/git config --local receive.denyCurrentBranch updateInstead"
   if [ $? -gt 0 ]; then
@@ -177,8 +177,8 @@ if [ $? -gt 0 ]; then
     reset_head ${commit}
     exit 4
   fi
-  git push -q --force --set-upstream "${server}_${repo}" >/dev/null 2>/tmp/err
-  if [ $? -gt 0 ]; then
+  git push --force --set-upstream "${server}_${repo}" >/dev/null 2>/tmp/err
+  if [ $? -gt 1 ]; then
     echo "Unable to push to ${server}_${repo}." >&2
     reset_head ${commit}
     exit 4
