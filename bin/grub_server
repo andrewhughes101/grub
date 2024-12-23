@@ -19,7 +19,7 @@ MYDIR="$(cd "$(dirname "$0")" > /dev/null 2>&1 && pwd -P)"
 # bash to run correctly. 
 #
 
-export PATH=/usr/lpp/IBM/foz/v1r1/bi:$PATH
+export PATH=/usr/lpp/IBM/foz/v1r1/bin:$PATH
 export _BPXK_AUTOCVT=ON
 export _CEE_RUNOPTS="$_CEE_RUNOPTS FILETAG(AUTOCVT,AUTOTAG)"
 export _TAG_REDIR_ERR=txt

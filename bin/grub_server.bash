@@ -15,4 +15,4 @@ if ! [ -d "${server_root}/${repo}" ]; then
   echo "Directory ${server_root}/${repo} does not exist! No build performed." >&2
   exit 4
 fi
-cd "${server_root}/${repo}" && git checkout "${branch}" >/dev/null 2>/dev/null && ./build
+cd "${server_root}/${repo}" && git checkout "${branch}" && ./build
