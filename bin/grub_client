@@ -156,8 +156,6 @@ git remote set-branches "${server}_${repo}" "${active_branch}" >/dev/null
 if [ $? -gt 0 ]; then
   echo "Set up repository ${repo} on ${server_root}"
   ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_git_dir}/git init && ${remote_git_dir}/git config --local receive.denyCurrentBranch updateInstead"
-  # need this too... git remote add mfulton_aqts_asmdio mfulton_aqts:/u/mfulton/asmdio 
-  # could also set up git config automatically rather than make people fill it in since we have the remote git name now
   git remote set-branches "${server}_${repo}" "${active_branch}" >/dev/null
   if [ $? -gt 1 ]; then
     reset_head ${commit}
@@ -172,9 +170,19 @@ vecho "Synchronize changes to ${server}"
 
 git push -q --force --set-upstream "${server}_${repo}" >/dev/null 2>/tmp/err
 if [ $? -gt 0 ]; then
-  echo "Failed to synchronize with remote repo: ${server}_${repo}" >&2
-  reset_head ${commit}
-  exit 4
+  echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
+  ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_git_dir}/git init && ${remote_git_dir}/git config --local receive.denyCurrentBranch updateInstead"
+  if [ $? -gt 0 ]; then
+    echo "Failed to push to remote repo: ${server}_${repo} and attempt to create repository on server failed." >&2
+    reset_head ${commit}
+    exit 4
+  fi
+  git push -q --force --set-upstream "${server}_${repo}" >/dev/null 2>/tmp/err
+  if [ $? -gt 0 ]; then
+    echo "Unable to push to ${server}_${repo}." >&2
+    reset_head ${commit}
+    exit 4
+  fi
 fi
 
 seconds_sync=$(date '+%s')
