@@ -26,7 +26,7 @@ On your Mac:
 On your Mac, set up VSCode default build (Optional):
 
 - Launch VSCode
-- If you want to use *GRUB* on **multiple repositories**, you can set up a *User task* with `Cmd-Shift-P`, then choose *Open User Tasks* to create a user level task. Copy the sample [tasks.json](sample/tasks.json) into the *tasks.json* file that is available 
+- If you want to use *GRUB* on **multiple repositories**, you can set up a *User task* with `Cmd-Shift-P`, then choose *Open User Tasks* to create a user level task. Copy the sample [tasks.json](sample/tasks.json) into the *tasks.json* file that is available.
 across all folders and workspaces.
 - If you only want to run *GRUB* on **one repository**:
   - Copy the sample [tasks.json](sample/tasks.json) into the *.vscode* directory of your repository. You may need to create the *.vscode* directory if you haven't done any VSCode customization of your repository yet.

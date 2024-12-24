@@ -76,9 +76,24 @@ if ! [ -d "${client_root}" ]; then
 fi
 
 if ! cd "${client_root}" ; then
-  echo "Unable to change into ${client_root}/${repo} directory." >&2
+  echo "Unable to change into ${client_root} directory." >&2
   exit 8
 fi
+
+#
+# If this is being driven from VSCode, and a multi-root workspace is being used
+# then the 'client root' is actually the root of the workspace, not the root of 
+# the repository, which is what we want.
+# Fix the variable and normalize it too
+#
+
+client_root="${client_root}/../${repo}"
+if ! cd "${client_root}" ; then
+  echo "Unable to change into ${client_root} directory." >&2
+  exit 8
+fi
+
+client_root=$(cd "${client_root}" > /dev/null 2>&1 && pwd -P)
 
 vecho "Start:" $(date)
 seconds_start=$(date '+%s')
@@ -166,7 +181,7 @@ fi
 #
 # The force is required because we may have reset the head one or more times
 #
-vecho "Synchronize changes to ${server}"
+vecho "Synchronize changes from ${client_root} to ${server}"
 
 git push --force --set-upstream "${server}_${repo}" >/dev/null 2>/tmp/err
 if [ $? -gt 1 ]; then
