@@ -10,7 +10,20 @@
 				"kind": "build",
 				"isDefault": true
 			},
-			"problemMatcher": []
+			"problemMatcher": 
+			{
+				"owner": "cpp",
+				"fileLocation": ["relative", "${workspaceFolder}"],
+				"source": "xlc",
+				"pattern": {
+					"regexp": "^(WARNING|ERROR|INFORMATIONAL)\\s+[A-Z0-9]*\\s+(.*):(\\d+)\\s+(.*)$",
+					"file": 2,
+					"line": 3,
+					"column": 5,
+					"severity": 1,
+					"message": 4
+				}
+			}
 		}
 	]
 }
