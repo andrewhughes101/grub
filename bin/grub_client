@@ -228,7 +228,7 @@ wait ${pid_out} ${pid_err} # put the specific jobs in so that the RC will get se
 rc=$?
 if [ $rc -gt 0 ]; then
   echo "SFTP failed to download one or both of ${bld_out} and ${bld_err} from ${server}. rc ${rc}" >&2
-  echo "${bldout_err}" >&2
+  echo "${bldout_out}" >&2
   echo "${blderr_err}" >&2
   exit 4
 fi
@@ -237,6 +237,8 @@ seconds_download=$(date '+%s')
 
 echo "Output downloaded to ${bld_out}"
 echo "Errors downloaded to ${bld_err}"
+err=$(cat ${bld_err})
+echo "${err}" >&2
 
 reset_head ${commit}
 
