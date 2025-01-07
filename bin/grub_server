@@ -38,4 +38,6 @@ export _TAG_REDIR_OUT=txt
 # redirect the stdout and stderr to files so the client 
 # can then download the output
 #
-bash "${MYDIR}/grub_server.bash" "${server_root}" "${repo}" "${active_branch}" >"${bld_out}" 2>"${bld_err}"
+
+second_script="cd $server_root/$repo && git checkout $active_branch >/dev/null 2>&1 && ./build"
+echo $second_script | bash >"${bld_out}" 2>"${bld_err}"

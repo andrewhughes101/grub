@@ -1,11 +1,11 @@
-#!/bin/sh
+#!/bin/bash
 
 # grub_client: grub --help for syntax
 
 syntax()
 {
   echo "\
-Usage: grub_client [options] <client root> <server root> <server> <repo> <server build tool> <server Open Enterprise Foundation (OEF) dir>\n\
+Usage: grub_client [options] <client root> <server root> <server> <repo> <server Open Enterprise Foundation (OEF) dir>\n\
 Options:\n\
   -v | --verbose : print verbose output\n\
   -h | --help    : print this usage information\n\
@@ -20,8 +20,7 @@ where:\n\
   2: server_root       /u/fultonm/development\n\
   3: server            fultonm_zos\n\
   4: repo              asmdio\n\
-  5: server_build_tool /u/fultonm/grub/bin/grub_server\n\
-  6: server_oef_dir    /usr/lpp/IBM/foz/v1r1/bin\n\
+  5: server_oef_dir    /usr/lpp/IBM/foz/v1r1/bin\n\
 Note:\n\
   grub_client uses git and ssh to communicate with the remote server.\n\
   ssh should be configured with a public/private key and use a Host specification that includes at least a HostName and User specification.\n\
@@ -57,7 +56,7 @@ reset_head()
 
 vecho()
 {
-  if ${verbose}; then
+  if [ ${verbose} ]; then
     echo "$*"
   fi
 }
@@ -75,10 +74,9 @@ client_root=$1
 server_root=$2
 server=$3
 repo=$4
-remote_build_tool=$5
-remote_oef_dir=$6
+remote_oef_dir=$5
 
-if [[ $# -ne 6 ]]; then
+if [[ $# -ne 5 ]]; then
   syntax
   exit 4
 fi
@@ -95,7 +93,7 @@ fi
 
 #
 # If this is being driven from VSCode, and a multi-root workspace is being used
-# then the 'client root' is actually the root of the workspace, not the root of 
+# then the 'client root' is actually the root of the workspace, not the root of
 # the repository, which is what we want.
 # Fix the variable and normalize it too
 #
@@ -162,6 +160,22 @@ git commit -m 'temporary commit' >/dev/null
 #
 # Could get a '1' indicating nothing to commit - this is not an error
 #
+
+#
+# msf - If you are not using fast-forwarding, you may have to do a force-lease
+# to publish your changes to github.ibm.com
+# If you want to avoid this and are ok with it, you can do:
+#   git config pull.ff true
+# to specify fast-forwarding.
+# You can also do it globally if you want, e.g.
+#   git config --global pull.ff true
+# See: https://thelinuxcode.com/use-pull-rebase-false-pull-ff-true-git/
+
+if [ $? -gt 1 ]; then
+  echo "Problems trying to commit files to ${active_branch}" >&2
+  exit 4
+fi
+
 if [ $? -eq 0 ]; then
   commit=1
 else
@@ -224,13 +238,14 @@ seconds_sync=$(date '+%s')
 
 vecho "Repository synchronized:" $(date)
 
-vecho "Run build ${remote_build_tool} on ${server} in directory ${server_root}"
+client_dir="$(dirname "$(realpath "$0")")"
 
 bld_err="/tmp/grub.${server}_${repo}.err"
 bld_out="/tmp/grub.${server}_${repo}.out"
-ssh "${server}" ${remote_build_tool} "${server_root} ${repo} ${active_branch} ${remote_oef_dir} ${bld_out} ${bld_err}"
+
+cat $client_dir/grub_server | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$bld_out" "$bld_err"
 if [ $? -gt 0 ]; then
-  echo "ssh command <ssh ${server} ${remote_build_tool} ${server_root} ${repo} ${active_branch} ${remote_oef_dir} ${bld_out} ${bld_err}> failed.\n" >&2
+  echo "ssh command <ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$bld_out" "$bld_err"> failed.\n" >&2
 fi
 
 seconds_build=$(date '+%s')
