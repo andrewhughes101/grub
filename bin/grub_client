@@ -57,7 +57,7 @@ vecho()
   fi
 }
 
-# set -x
+set -x
 
 if [ "$1" = "-v" ] || [ "$1" = "verbose" ]; then
   verbose=True
@@ -157,26 +157,15 @@ git commit -m 'temporary commit' >/dev/null
 #
 # Could get a '1' indicating nothing to commit - this is not an error
 #
-
-#
-# msf - If you are not using fast-forwarding, you may have to do a force-lease
-# to publish your changes to github.ibm.com
-# If you want to avoid this and are ok with it, you can do:
-#   git config pull.ff true
-# to specify fast-forwarding.
-# You can also do it globally if you want, e.g.
-#   git config --global pull.ff true
-# See: https://thelinuxcode.com/use-pull-rebase-false-pull-ff-true-git/ 
-
-if [ $? -gt 1 ]; then
-  echo "Problems trying to commit files to ${active_branch}" >&2
-  exit 4
-fi
-
 if [ $? -eq 0 ]; then
   commit=1
 else
-  commit=0
+  if [ $? -gt 1 ]; then
+    echo "Problems trying to commit files to ${active_branch}" >&2
+    exit 4
+  else
+    commit=0
+  fi
 fi
 
 seconds_commit=$(date '+%s')
@@ -191,6 +180,16 @@ if [ $? -gt 0 ]; then
     exit 4
   fi
 fi
+
+#
+# msf - If you are not using fast-forwarding, you may have to do a force-lease
+# to publish your changes to github.ibm.com
+# If you want to avoid this and are ok with it, you can do:
+#   git config pull.ff true
+# to specify fast-forwarding.
+# You can also do it globally if you want, e.g.
+#   git config --global pull.ff true
+# See: https://thelinuxcode.com/use-pull-rebase-false-pull-ff-true-git/ 
 
 #
 # The force is required because we may have reset the head one or more times
