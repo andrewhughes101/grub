@@ -235,10 +235,20 @@ fi
 
 seconds_download=$(date '+%s')
 
-echo "Output downloaded to ${bld_out}"
-echo "Errors downloaded to ${bld_err}"
+out=$(cat ${bld_out})
+if [ "${out}" != "" ]; then
+  echo "Output downloaded to ${bld_out}"
+else
+  echo "No output from build."
+fi
+
 err=$(cat ${bld_err})
-echo "${err}" >&2
+if [ "${err}" != "" ]; then
+  echo "Errors downloaded to ${bld_err}"
+  echo "${err}" >&2
+else
+  echo "No errors from build."
+fi
 
 reset_head ${commit}
 
