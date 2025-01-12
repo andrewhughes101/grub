@@ -57,7 +57,7 @@ vecho()
   fi
 }
 
-set -x
+#set -x
 
 if [ "$1" = "-v" ] || [ "$1" = "verbose" ]; then
   verbose=True
