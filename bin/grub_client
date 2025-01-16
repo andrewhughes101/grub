@@ -48,6 +48,11 @@ reset_head()
     echo "Problems trying to update remote.origin.url to ${active_origin_url}" >&2
     exit 4
   fi
+  git config "branch.${active_branch}.remote" "${active_origin_url}"
+  if [ $? -gt 0 ]; then
+    echo "Problems trying to update branch.${active_branch}.remote to ${active_origin_url}" >&2
+    exit 4
+  fi 
 }
 
 vecho()
