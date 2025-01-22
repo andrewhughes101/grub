@@ -197,7 +197,9 @@ fi
 # See: https://thelinuxcode.com/use-pull-rebase-false-pull-ff-true-git/ 
 
 #
-# The force is required because we may have reset the head one or more times
+# The --force-with-lease is required because we may have reset the head one or more times
+# If you get a message about 'stale info' then this might require 'git remote prune origin'
+# (msf - this particular 'git push' needs some more homework)
 #
 vecho "Synchronize changes from ${client_root} to ${server}"
 
