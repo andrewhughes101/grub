@@ -5,7 +5,7 @@
 syntax()
 {
   echo "\
-Usage: grub_client [options] <client root> <server root> <server> <repo> <server Open Enterprise Foundation (OEF) dir>\n\
+Usage: grub_client [options] <client root> <server root> <server> <repo> <server Open Enterprise Foundation (OEF) dir> <remote build command (default ./build)>\n\
 Options:\n\
   -v | --verbose : print verbose output\n\
   -h | --help    : print this usage information\n\
@@ -22,6 +22,7 @@ where:\n\
   3: server            fultonm_zos\n\
   4: repo              asmdio\n\
   5: server_oef_dir    /usr/lpp/IBM/foz/v1r1/bin\n\
+  6: build_command     ./build\n\
 Note:\n\
   grub_client uses git and ssh to communicate with the remote server.\n\
   ssh should be configured with a public/private key and use a Host specification that includes at least a HostName and User specification.\n\
@@ -84,7 +85,7 @@ server=$3
 repo=$4
 remote_oef_dir=$5
 
-if [[ $# -ne 5 ]]; then
+if [[ $# -ne 5 &&  $# -ne 6 ]]; then
   syntax
   exit 4
 fi
@@ -97,6 +98,12 @@ fi
 if ! cd "${client_root}" ; then
   echo "Unable to change into ${client_root} directory." >&2
   exit 8
+fi
+
+if [[ -z "$6" ]]; then
+  build_command="./build"
+else
+  build_command=$6
 fi
 
 #
@@ -251,10 +258,10 @@ client_dir="$(dirname "$(realpath "$0")")"
 bld_err="/tmp/grub.${server}_${repo}.err"
 bld_out="/tmp/grub.${server}_${repo}.out"
 
-cat $client_dir/grub_server | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$bld_out" "$bld_err"
+cat $client_dir/grub_server | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "$bld_out" "$bld_err"
 ssh_command_exit=$?
 if [ $ssh_command_exit -gt 0 ]; then
-  echo "ssh command <ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$bld_out" "$bld_err"> failed.\n" >&2
+  echo "ssh command <ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "$bld_out" "$bld_err"> failed.\n" >&2
 fi
 
 seconds_build=$(date '+%s')

@@ -9,11 +9,9 @@ server_root="$1"
 repo="$2"
 active_branch="$3"
 oef_dir="$4"
-bld_out="$5"
-bld_err="$6"
-
-ME=$(basename $0)
-MYDIR="$(cd "$(dirname "$0")" > /dev/null 2>&1 && pwd -P)"
+build_command="$5"
+bld_out="$6"
+bld_err="$7"
 
 #
 # Add the oef_dir (Open Enterprise Foundation) directory 
@@ -39,5 +37,5 @@ export _TAG_REDIR_OUT=txt
 # can then download the output
 #
 
-second_script="cd $server_root/$repo && git checkout $active_branch >/dev/null 2>&1 && ./build"
+second_script="cd $server_root/$repo && git checkout $active_branch >/dev/null 2>&1 && $build_command"
 echo $second_script | bash >"${bld_out}" 2>"${bld_err}"
