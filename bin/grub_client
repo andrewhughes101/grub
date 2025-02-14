@@ -9,6 +9,7 @@ Usage: grub_client [options] <client root> <server root> <server> <repo> <server
 Options:\n\
   -v | --verbose : print verbose output\n\
   -h | --help    : print this usage information\n\
+  -o | --output  : print the stdout and stderr returned from the remote\n\
 Example:\n\
   To run a git remote user build, synchronizing the git repo asmdio under \$HOME/Documents/Development\n\
    to /u/fultonm/development on the ssh host fultonm_zos\n\
@@ -68,6 +69,13 @@ if [ "$1" = "-v" ] || [ "$1" = "verbose" ]; then
   shift 1
 else
   verbose=False
+fi
+
+if [ "$1" = "-o" ] || [ "$1" = "output" ]; then
+  output=True
+  shift 1
+else
+  output=False
 fi
 
 client_root=$1
@@ -217,7 +225,7 @@ fi
 #
 vecho "Synchronize changes from ${client_root} to ${server}"
 
-git push --force-with-lease --set-upstream "${server}_${repo}"
+git push --force --set-upstream "${server}_${repo}"
 if [ $? -gt 1 ]; then
   echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
   ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
@@ -244,7 +252,8 @@ bld_err="/tmp/grub.${server}_${repo}.err"
 bld_out="/tmp/grub.${server}_${repo}.out"
 
 cat $client_dir/grub_server | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$bld_out" "$bld_err"
-if [ $? -gt 0 ]; then
+ssh_command_exit=$?
+if [ $ssh_command_exit -gt 0 ]; then
   echo "ssh command <ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$bld_out" "$bld_err"> failed.\n" >&2
 fi
 
@@ -298,3 +307,13 @@ vecho " remote build: " $((seconds_build-$seconds_sync)) "s"
 vecho " download:     " $((seconds_download-$seconds_build)) "s"
 vecho " reset:        " $((seconds_reset-$seconds_download)) "s"
 vecho "Total time:    " $((seconds_reset-$seconds_start)) "s"
+
+if [ ${output} ]; then
+  echo "Output from ${bld_out}"
+  cat $bld_out
+  echo "Errors from ${bld_err}"
+  cat $bld_err
+fi
+
+# Use exit code of ssh command to exit script to determine overall exit code
+exit $ssh_command_exit
