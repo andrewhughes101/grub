@@ -232,7 +232,7 @@ fi
 #
 vecho "Synchronize changes from ${client_root} to ${server}"
 
-git push --force --set-upstream "${server}_${repo}"
+git push --force-with-lease "${server}_${repo}"
 if [ $? -gt 1 ]; then
   echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
   ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
@@ -241,7 +241,7 @@ if [ $? -gt 1 ]; then
     reset_head ${commit} "${active_origin_url}"
     exit 4
   fi
-  git push --force --set-upstream "${server}_${repo}"
+  git push --force "${server}_${repo}"
   if [ $? -gt 1 ]; then
     echo "Unable to push to ${server}_${repo}." >&2
     reset_head ${commit} "${active_origin_url}"
@@ -321,6 +321,9 @@ if [ ${output} ]; then
   echo "Errors from ${bld_err}"
   cat $bld_err
 fi
+
+# Clean up the remote we added
+git remote remove  "${server}_${repo}"
 
 # Use exit code of ssh command to exit script to determine overall exit code
 exit $ssh_command_exit
