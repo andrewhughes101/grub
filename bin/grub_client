@@ -65,6 +65,8 @@ vecho()
 
 #set -x
 
+# Replace this with proper argument parsing
+
 if [ "$1" = "-v" ] || [ "$1" = "verbose" ]; then
   verbose=True
   shift 1
@@ -232,7 +234,7 @@ fi
 #
 vecho "Synchronize changes from ${client_root} to ${server}"
 
-git push --force-with-lease "${server}_${repo}"
+git push --force "${server}_${repo}"
 if [ $? -gt 1 ]; then
   echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
   ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
@@ -258,7 +260,7 @@ client_dir="$(dirname "$(realpath "$0")")"
 bld_err="/tmp/grub.${server}_${repo}.err"
 bld_out="/tmp/grub.${server}_${repo}.out"
 
-cat $client_dir/grub_server | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "$bld_out" "$bld_err"
+cat "$client_dir/grub_server" | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "$bld_out" "$bld_err"
 ssh_command_exit=$?
 if [ $ssh_command_exit -gt 0 ]; then
   echo "ssh command <ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "$bld_out" "$bld_err"> failed.\n" >&2
@@ -271,7 +273,7 @@ vecho "Build complete:" $(date)
 #
 # Run the SFTP's in the background so they can process in parallel
 #
-bldout_err=$(sftp "${server}:${bld_out}" /tmp 2>&1) &
+bldout_out=$(sftp "${server}:${bld_out}" /tmp 2>&1) &
 pid_out=$!
 blderr_err=$(sftp "${server}:${bld_err}" /tmp 2>&1) &
 pid_err=$!
