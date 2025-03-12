@@ -158,10 +158,20 @@ if [ "${receivepack}" = '' ]; then
   fi
 fi
 
-active_branch=$(git rev-parse --abbrev-ref HEAD)
-if [ $? -gt 0 ]; then
-  echo "Unable to determine current local branch" >&2
-  exit 8
+# Before pushing check if we're in a detached HEAD and push a temporary branch instead
+
+git symbolic-ref -q HEAD
+DETACHED=$?
+DETACHED_BRANCH_NAME="detached-head-branch"
+
+if [ $DETACHED -gt 0 ]; then
+  active_branch="$DETACHED_BRANCH_NAME"
+else
+  active_branch=$(git rev-parse --abbrev-ref HEAD)
+  if [ $? -gt 0 ]; then
+    echo "Unable to determine current local branch" >&2
+    exit 8
+  fi
 fi
 
 #
@@ -233,8 +243,14 @@ fi
 # (msf - this particular 'git push' needs some more homework)
 #
 vecho "Synchronize changes from ${client_root} to ${server}"
+if [ $DETACHED -gt 0 ]; then
+  echo "On detached HEAD, pushing using temporary branch '$DETACHED_BRANCH_NAME'"
+  git branch $DETACHED_BRANCH_NAME
+  git push --force --verbose -u "${server}_${repo}" $DETACHED_BRANCH_NAME
+else
+  git push --force --verbose "${server}_${repo}"
+fi
 
-git push --force "${server}_${repo}"
 if [ $? -gt 1 ]; then
   echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
   ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
@@ -243,8 +259,14 @@ if [ $? -gt 1 ]; then
     reset_head ${commit} "${active_origin_url}"
     exit 4
   fi
-  git push --force "${server}_${repo}"
-  if [ $? -gt 1 ]; then
+  if [ $DETACHED -gt 0 ]; then
+    echo "On detached HEAD, pushing using temporary branch '$DETACHED_BRANCH_NAME'"
+    git branch $DETACHED_BRANCH_NAME
+    git push --force --verbose -u "${server}_${repo}" $DETACHED_BRANCH_NAME
+  else
+    git push --force --verbose "${server}_${repo}"
+  fi
+  if [ $? -gt 0 ]; then
     echo "Unable to push to ${server}_${repo}." >&2
     reset_head ${commit} "${active_origin_url}"
     exit 4
@@ -322,6 +344,13 @@ if [ ${output} ]; then
   cat $bld_out
   echo "Errors from ${bld_err}"
   cat $bld_err
+fi
+
+
+# Clean up temporary branch if we made one
+if [ $DETACHED -gt 0 ]; then
+  # Delete locally
+  git branch -D $DETACHED_BRANCH_NAME
 fi
 
 # Clean up the remote we added
