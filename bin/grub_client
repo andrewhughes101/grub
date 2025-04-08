@@ -174,44 +174,25 @@ else
   fi
 fi
 
-#
-# Add any uncommitted changes to active_branch
-#
-git add .
+# Assuming we havent made a commit
+commit=0
+
+# Do a diff check to see if we need to commit or not
+git diff --exit-code --quiet
 if [ $? -gt 0 ]; then
-  echo "Problems trying to add to ${active_branch}" >&2
-  exit 4
-fi
-git commit -m 'temporary commit' >/dev/null
-
-#
-# Could get a '1' indicating nothing to commit - this is not an error
-#
-
-#
-# msf - If you are not using fast-forwarding, you may have to do a force-lease
-# to publish your changes to github.ibm.com
-# If you want to avoid this and are ok with it, you can do:
-#   git config pull.ff true
-# to specify fast-forwarding.
-# You can also do it globally if you want, e.g.
-#   git config --global pull.ff true
-# See: https://thelinuxcode.com/use-pull-rebase-false-pull-ff-true-git/
-
-if [ $? -gt 1 ]; then
-  echo "Problems trying to commit files to ${active_branch}" >&2
-  exit 4
-fi
-
-if [ $? -eq 0 ]; then
-  commit=1
-else
+  # Unchecked changes
+  # Add any uncommitted changes to active_branch
+  git add .
+  if [ $? -gt 0 ]; then
+    echo "Problems trying to add to ${active_branch}" >&2
+    exit 4
+  fi
+  git commit --no-verify -m 'temporary commit' -- >/dev/null
   if [ $? -gt 1 ]; then
     echo "Problems trying to commit files to ${active_branch}" >&2
     exit 4
-  else
-    commit=0
   fi
+  commit=1
 fi
 
 seconds_commit=$(date '+%s')
