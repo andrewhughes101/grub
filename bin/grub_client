@@ -48,19 +48,9 @@ Notes:
 " >&2
 }
 
-reset_head()
+reset_origin_url()
 {
-  commit=$1
-  active_origin_url=$2
-
-  # switch back to original before commit if changes made
-  if [ $commit -eq 1 ]; then
-    git reset 'HEAD^1' >/dev/null
-    if [ $? -gt 0 ]; then
-      echo "Problems trying to reset ${active_branch} to undo dummy 'commit'. Use git log to see what happened." >&2
-      exit 4
-    fi
-  fi
+  active_origin_url=$1
 
   # switch back to origin url that was active before build
   git config remote.origin.url "${active_origin_url}"
@@ -89,6 +79,8 @@ push_to_remote()
   local detached=$2
   local branch_name=$3
 
+  # Push with --force to overwrite remote state
+  # The server will only keep what we push due to receive.denyCurrentBranch updateInstead
   if [ $detached -gt 0 ]; then
     echo "On detached HEAD, pushing using temporary branch '$branch_name'"
     git branch $branch_name 2>/dev/null || true  # Branch might already exist
@@ -114,6 +106,11 @@ cleanup()
   # Clean up the remote we added
   if [ -n "$server" ] && [ -n "$repo" ]; then
     git remote remove "${server}_${repo}" 2>/dev/null || true
+  fi
+
+  # Clean up local patch file if it exists
+  if [ -n "$patch_file" ] && [ -f "$patch_file" ]; then
+    rm -f "$patch_file" 2>/dev/null || true
   fi
 }
 
@@ -259,36 +256,54 @@ else
   fi
 fi
 
-# Assuming we havent made a commit
-commit=0
+# Check if there are unstaged changes and create a patch file if needed
+client_tmpdir="${TMPDIR:-/tmp}"
+patch_file="${client_tmpdir}/grub_${server}_${repo}.patch"
+has_unstaged_changes=0
 
-# Do a diff check to see if we need to commit or not
-git diff --exit-code --quiet
-if [ $? -gt 0 ]; then
-  # Unchecked changes
-  # Add any uncommitted changes to active_branch
-  git add .
-  if [ $? -gt 0 ]; then
-    echo "Problems trying to add to ${active_branch}" >&2
-    exit 4
+# Check for unstaged changes (both tracked and untracked files)
+if ! git diff --exit-code --quiet || ! git diff --cached --exit-code --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  has_unstaged_changes=1
+  vecho "Creating patch file for unstaged changes"
+
+  # Create a comprehensive patch that includes:
+  # 1. Unstaged changes to tracked files
+  # 2. Staged changes
+  # 3. Untracked files
+  {
+    # First, output diff for tracked files (staged and unstaged)
+    git diff HEAD
+
+    # Then, add untracked files as new file patches
+    git ls-files --others --exclude-standard | while read -r file; do
+      echo "diff --git a/$file b/$file"
+      echo "new file mode 100644"
+      echo "index 0000000..0000000"
+      echo "--- /dev/null"
+      echo "+++ b/$file"
+      # Add file content with + prefix for each line
+      awk '{print "+" $0}' "$file"
+    done
+  } > "$patch_file"
+
+  if [ ! -s "$patch_file" ]; then
+    # Patch file is empty, no changes after all
+    has_unstaged_changes=0
+    rm -f "$patch_file"
+  else
+    vecho "Patch file created: $patch_file"
   fi
-  git commit --no-verify -m 'temporary commit' -- >/dev/null
-  if [ $? -gt 1 ]; then
-    echo "Problems trying to commit files to ${active_branch}" >&2
-    exit 4
-  fi
-  commit=1
 fi
 
-seconds_commit=$(date '+%s')
+seconds_patch=$(date '+%s')
 
 git remote set-branches "${server}_${repo}" "${active_branch}" >/dev/null
 if [ $? -gt 0 ]; then
   echo "Set up repository ${repo} on ${server_root}"
-  ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
+  ssh "${server}" "mkdir -p ${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
   git remote set-branches "${server}_${repo}" "${active_branch}" >/dev/null
   if [ $? -gt 1 ]; then
-    reset_head ${commit} "${active_origin_url}"
+    reset_origin_url "${active_origin_url}"
     exit 4
   fi
 fi
@@ -318,7 +333,7 @@ if [ $? -gt 1 ]; then
   ssh "${server}" "mkdir -p ${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
   if [ $? -gt 0 ]; then
     echo "Failed to push to remote repo: ${server}_${repo} and attempt to create repository on server failed." >&2
-    reset_head ${commit} "${active_origin_url}"
+    reset_origin_url "${active_origin_url}"
     exit 4
   fi
 
@@ -326,7 +341,7 @@ if [ $? -gt 1 ]; then
   push_to_remote "${server}_${repo}" $DETACHED "$DETACHED_BRANCH_NAME"
   if [ $? -gt 0 ]; then
     echo "Unable to push to ${server}_${repo}." >&2
-    reset_head ${commit} "${active_origin_url}"
+    reset_origin_url "${active_origin_url}"
     exit 4
   fi
 fi
@@ -335,17 +350,32 @@ seconds_sync=$(date '+%s')
 
 vecho "Repository synchronized:" $(date)
 
-# Restore local git state immediately after push, before remote build
-reset_head ${commit} "${active_origin_url}"
+# Restore origin URL
+reset_origin_url "${active_origin_url}"
 
-seconds_reset=$(date '+%s')
+# Transfer patch file to server if we have unstaged changes
+if [ $has_unstaged_changes -eq 1 ]; then
+  vecho "Transferring patch file to server"
+  server_tmpdir="${TMPDIR:-/tmp}"
+  server_patch_file="${server_tmpdir}/grub_${server}_${repo}.patch"
 
-vecho "Local git state restored:" $(date)
+  scp -q "$patch_file" "${server}:${server_patch_file}"
+  if [ $? -gt 0 ]; then
+    echo "Failed to transfer patch file to server" >&2
+    exit 4
+  fi
+  vecho "Patch file transferred to ${server}:${server_patch_file}"
+fi
+
+seconds_transfer=$(date '+%s')
+
+vecho "Patch transfer complete:" $(date)
 
 client_dir="$(dirname "$(realpath "$0")")"
 
 # Execute grub_server and capture the output to get the remote temp file paths
-remote_output=$(cat "$client_dir/grub_server" | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "${server}")
+# Pass has_unstaged_changes flag to server
+remote_output=$(cat "$client_dir/grub_server" | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "${server}" "$has_unstaged_changes")
 ssh_command_exit=$?
 
 # Parse the output to extract the temp file paths
@@ -399,9 +429,7 @@ local_bld_err="${client_tmpdir}/$(basename ${bld_err})"
 if [ -f "${local_bld_out}" ]; then
   out=$(cat ${local_bld_out})
   if [ "${out}" != "" ]; then
-    echo "Output downloaded to ${local_bld_out}"
-  else
-    echo "No output from build."
+    vecho "Output downloaded to ${local_bld_out}"
   fi
 else
   echo "Warning: Output file ${local_bld_out} not found" >&2
@@ -410,10 +438,8 @@ fi
 if [ -f "${local_bld_err}" ]; then
   err=$(cat ${local_bld_err})
   if [ "${err}" != "" ]; then
-    echo "Errors downloaded to ${local_bld_err}"
+    vecho "Errors downloaded to ${local_bld_err}"
     echo "${err}" >&2
-  else
-    echo "No errors from build."
   fi
 else
   echo "Warning: Error file ${local_bld_err} not found" >&2
@@ -424,10 +450,10 @@ seconds_finish=$(date '+%s')
 vecho "Finish:" $(date)
 
 vecho "Times: "
-vecho " git commit:   " $((seconds_commit-$seconds_start)) "s"
-vecho " git sync:     " $((seconds_sync-$seconds_commit)) "s"
-vecho " git reset:    " $((seconds_reset-$seconds_sync)) "s"
-vecho " remote build: " $((seconds_build-$seconds_reset)) "s"
+vecho " patch create: " $((seconds_patch-$seconds_start)) "s"
+vecho " git sync:     " $((seconds_sync-$seconds_patch)) "s"
+vecho " patch xfer:   " $((seconds_transfer-$seconds_sync)) "s"
+vecho " remote build: " $((seconds_build-$seconds_transfer)) "s"
 vecho " download:     " $((seconds_download-$seconds_build)) "s"
 vecho "Total time:    " $((seconds_finish-$seconds_start)) "s"
 
