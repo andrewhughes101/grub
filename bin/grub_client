@@ -1,31 +1,50 @@
 #!/bin/bash
 
 # grub_client: grub --help for syntax
+VERSION="0.2.0"
 
 syntax()
 {
   echo "\
-Usage: grub_client [options] <client root> <server root> <server> <repo> <server Open Enterprise Foundation (OEF) dir> <remote build command (default ./build)>\n\
-Options:\n\
-  -v | --verbose : print verbose output\n\
-  -h | --help    : print this usage information\n\
-  -o | --output  : print the stdout and stderr returned from the remote\n\
-Example:\n\
-  To run a git remote user build, synchronizing the git repo asmdio under \$HOME/Documents/Development\n\
-   to /u/fultonm/development on the ssh host fultonm_zos\n\
-   and then run the remote build program /u/fultonm/tools/grub/bin/grub_server using the remote 'git' at /usr/lpp/IBM/foz/v1r1\n\
-  grub_client \$HOME/Documents/Development /u/fultonm/development fultonm_zos asmdio /u/fultonm/grub/bin/grub_server /usr/lpp/IBM/foz/v1r1/bin\n\
-where:\n\
-  0: this program      grub_client\n\
-  1: client_root       \$HOME/Documents/Development\n\
-  2: server_root       /u/fultonm/development\n\
-  3: server            fultonm_zos\n\
-  4: repo              asmdio\n\
-  5: server_oef_dir    /usr/lpp/IBM/foz/v1r1/bin\n\
-  6: build_command     ./build\n\
-Note:\n\
-  grub_client uses git and ssh to communicate with the remote server.\n\
-  ssh should be configured with a public/private key and use a Host specification that includes at least a HostName and User specification.\n\
+Usage: grub_client [options] <server root> <server> <server OEF dir> [build command]
+
+Options:
+  -v | --verbose           : print verbose output
+  -h | --help              : print this usage information
+  -o | --output            : print the stdout and stderr returned from the remote
+  --version                : print version information
+  --repo-path <path>       : path to repository (default: current directory)
+
+Arguments:
+  server_root    : remote root directory for repositories
+  server         : ssh host specification (from ~/.ssh/config)
+  server_oef_dir : Open Enterprise Foundation directory on server (contains git)
+  build_command  : command to run on server (default: ./build)
+
+Examples:
+  1. Build current directory repository on remote server:
+     cd /path/to/myrepo
+     grub_client /u/fultonm/development fultonm_zos /usr/lpp/IBM/foz/v1r1/bin
+
+  2. Build specific repository:
+     grub_client --repo-path \$HOME/projects/asmdio /u/fultonm/development fultonm_zos /usr/lpp/IBM/foz/v1r1/bin
+
+  3. With custom build command:
+     grub_client /u/fultonm/development fultonm_zos /usr/lpp/IBM/foz/v1r1/bin make
+
+  4. From VSCode (uses workspace folder automatically):
+     grub_client --repo-path \${workspaceFolder} /u/fultonm/development fultonm_zos /usr/lpp/IBM/foz/v1r1/bin
+
+Environment Variables:
+  TMPDIR : temporary directory for local files (default: /tmp)
+           Remote server also honors TMPDIR for its temporary files
+
+Notes:
+  - Repository name is automatically extracted from the path
+  - grub_client uses git and ssh to communicate with the remote server
+  - ssh should be configured with public/private key authentication
+  - ssh Host specification must include at least HostName and User
+  - grub_server script is automatically transferred to the remote server
 " >&2
 }
 
@@ -53,7 +72,7 @@ reset_head()
   if [ $? -gt 0 ]; then
     echo "Problems trying to update branch.${active_branch}.remote to ${active_origin_url}" >&2
     exit 4
-  fi 
+  fi
 }
 
 vecho()
@@ -63,65 +82,131 @@ vecho()
   fi
 }
 
+# Function to push to remote repository
+push_to_remote()
+{
+  local server_repo=$1
+  local detached=$2
+  local branch_name=$3
+
+  if [ $detached -gt 0 ]; then
+    echo "On detached HEAD, pushing using temporary branch '$branch_name'"
+    git branch $branch_name 2>/dev/null || true  # Branch might already exist
+    git push --force --verbose -u "${server_repo}" $branch_name
+  else
+    git push --force --verbose "${server_repo}"
+  fi
+
+  return $?
+}
+
+# Cleanup function called on exit via trap
+cleanup()
+{
+  # Don't call exit here - just do cleanup and return
+  # The original exit code will be preserved
+
+  # Clean up temporary branch if we made one
+  if [ -n "$DETACHED" ] && [ $DETACHED -gt 0 ] && [ -n "$DETACHED_BRANCH_NAME" ]; then
+    git branch -D $DETACHED_BRANCH_NAME 2>/dev/null || true
+  fi
+
+  # Clean up the remote we added
+  if [ -n "$server" ] && [ -n "$repo" ]; then
+    git remote remove "${server}_${repo}" 2>/dev/null || true
+  fi
+}
+
 #set -x
 
-# Replace this with proper argument parsing
+# Set up trap to ensure cleanup on exit
+trap cleanup EXIT INT TERM
 
-if [ "$1" = "-v" ] || [ "$1" = "verbose" ]; then
-  verbose=True
-  shift 1
-else
-  verbose=False
-fi
+# Parse options
+verbose=False
+output=False
+repo_path=""
 
-if [ "$1" = "-o" ] || [ "$1" = "output" ]; then
-  output=True
-  shift 1
-else
-  output=False
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -v|--verbose)
+      verbose=True
+      shift
+      ;;
+    -o|--output)
+      output=True
+      shift
+      ;;
+    --repo-path)
+      if [ -z "$2" ]; then
+        echo "Error: --repo-path requires a path argument" >&2
+        exit 4
+      fi
+      repo_path="$2"
+      shift 2
+      ;;
+    -h|--help)
+      syntax
+      exit 0
+      ;;
+    --version)
+      echo "grub_client version $VERSION"
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      syntax
+      exit 4
+      ;;
+    *)
+      # First non-option argument, stop parsing options
+      break
+      ;;
+  esac
+done
 
-client_root=$1
-server_root=$2
-server=$3
-repo=$4
-remote_oef_dir=$5
+# New simplified arguments
+server_root=$1
+server=$2
+remote_oef_dir=$3
 
-if [[ $# -ne 5 &&  $# -ne 6 ]]; then
+if [[ $# -lt 3 || $# -gt 4 ]]; then
   syntax
   exit 4
 fi
 
-if ! [ -d "${client_root}" ]; then
-  echo "${client_root} is not a directory." >&2
+# Determine repository path
+if [ -z "$repo_path" ]; then
+  # Default to current working directory
+  repo_path="$PWD"
+  vecho "Using current directory as repository path: $repo_path"
+fi
+
+# Validate and normalize the repository path
+if ! [ -d "$repo_path" ]; then
+  echo "Error: Repository path '$repo_path' does not exist" >&2
   exit 8
 fi
 
-if ! cd "${client_root}" ; then
-  echo "Unable to change into ${client_root} directory." >&2
+if ! cd "$repo_path" ; then
+  echo "Unable to change into repository directory: $repo_path" >&2
   exit 8
 fi
 
-if [[ -z "$6" ]]; then
+# Get absolute normalized path
+repo_path=$(pwd -P)
+vecho "Normalized repository path: $repo_path"
+
+# Extract repository name from path
+repo=$(basename "$repo_path")
+vecho "Repository name: $repo"
+
+# Set build command
+if [[ -z "$4" ]]; then
   build_command="./build"
 else
-  build_command=$6
+  build_command=$4
 fi
-
-#
-# If this is being driven from VSCode, and a multi-root workspace is being used
-# then the 'client root' is actually the root of the workspace, not the root of
-# the repository, which is what we want.
-# Fix the variable and normalize it too
-#
-
-client_root="${client_root}/../${repo}"
-if ! cd "${client_root}" ; then
-  echo "Unable to change into ${client_root} directory." >&2
-  exit 8
-fi
-
-client_root=$(cd "${client_root}" > /dev/null 2>&1 && pwd -P)
 
 vecho "Start:" $(date)
 seconds_start=$(date '+%s')
@@ -216,7 +301,7 @@ fi
 # to specify fast-forwarding.
 # You can also do it globally if you want, e.g.
 #   git config --global pull.ff true
-# See: https://thelinuxcode.com/use-pull-rebase-false-pull-ff-true-git/ 
+# See: https://thelinuxcode.com/use-pull-rebase-false-pull-ff-true-git/
 
 #
 # The --force-with-lease is required because we may have reset the head one or more times
@@ -224,29 +309,21 @@ fi
 # (msf - this particular 'git push' needs some more homework)
 #
 vecho "Synchronize changes from ${client_root} to ${server}"
-if [ $DETACHED -gt 0 ]; then
-  echo "On detached HEAD, pushing using temporary branch '$DETACHED_BRANCH_NAME'"
-  git branch $DETACHED_BRANCH_NAME
-  git push --force --verbose -u "${server}_${repo}" $DETACHED_BRANCH_NAME
-else
-  git push --force --verbose "${server}_${repo}"
-fi
+
+# Try to push to remote
+push_to_remote "${server}_${repo}" $DETACHED "$DETACHED_BRANCH_NAME"
 
 if [ $? -gt 1 ]; then
   echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
-  ssh "${server}" mkdir -p "${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
+  ssh "${server}" "mkdir -p ${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
   if [ $? -gt 0 ]; then
     echo "Failed to push to remote repo: ${server}_${repo} and attempt to create repository on server failed." >&2
     reset_head ${commit} "${active_origin_url}"
     exit 4
   fi
-  if [ $DETACHED -gt 0 ]; then
-    echo "On detached HEAD, pushing using temporary branch '$DETACHED_BRANCH_NAME'"
-    git branch $DETACHED_BRANCH_NAME
-    git push --force --verbose -u "${server}_${repo}" $DETACHED_BRANCH_NAME
-  else
-    git push --force --verbose "${server}_${repo}"
-  fi
+
+  # Retry push after setting up repository
+  push_to_remote "${server}_${repo}" $DETACHED "$DETACHED_BRANCH_NAME"
   if [ $? -gt 0 ]; then
     echo "Unable to push to ${server}_${repo}." >&2
     reset_head ${commit} "${active_origin_url}"
@@ -258,15 +335,36 @@ seconds_sync=$(date '+%s')
 
 vecho "Repository synchronized:" $(date)
 
+# Restore local git state immediately after push, before remote build
+reset_head ${commit} "${active_origin_url}"
+
+seconds_reset=$(date '+%s')
+
+vecho "Local git state restored:" $(date)
+
 client_dir="$(dirname "$(realpath "$0")")"
 
-bld_err="/tmp/grub.${server}_${repo}.err"
-bld_out="/tmp/grub.${server}_${repo}.out"
-
-cat "$client_dir/grub_server" | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "$bld_out" "$bld_err"
+# Execute grub_server and capture the output to get the remote temp file paths
+remote_output=$(cat "$client_dir/grub_server" | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "${server}")
 ssh_command_exit=$?
+
+# Parse the output to extract the temp file paths
+bld_out=$(echo "$remote_output" | grep "^GRUB_OUT=" | cut -d= -f2)
+bld_err=$(echo "$remote_output" | grep "^GRUB_ERR=" | cut -d= -f2)
+
+vecho "grub version: $VERSION"
+
+if [ -z "$bld_out" ] || [ -z "$bld_err" ]; then
+  echo "Failed to retrieve remote temp file paths from grub_server output" >&2
+  echo "Remote output was:" >&2
+  echo "$remote_output" >&2
+  exit 4
+fi
+
 if [ $ssh_command_exit -gt 0 ]; then
-  echo "ssh command <ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "$bld_out" "$bld_err"> failed.\n" >&2
+  echo "Remote build failed with exit code $ssh_command_exit" >&2
+  vecho "Remote output:" >&2
+  vecho "$remote_output" >&2
 fi
 
 seconds_build=$(date '+%s')
@@ -275,67 +373,76 @@ vecho "Build complete:" $(date)
 
 #
 # Run the SFTP's in the background so they can process in parallel
+# Use TMPDIR if set, otherwise fall back to /tmp
 #
-bldout_out=$(sftp "${server}:${bld_out}" /tmp 2>&1) &
+client_tmpdir="${TMPDIR:-/tmp}"
+bldout_out=$(sftp "${server}:${bld_out}" "${client_tmpdir}" 2>&1) &
 pid_out=$!
-blderr_err=$(sftp "${server}:${bld_err}" /tmp 2>&1) &
+blderr_err=$(sftp "${server}:${bld_err}" "${client_tmpdir}" 2>&1) &
 pid_err=$!
 wait ${pid_out} ${pid_err} # put the specific jobs in so that the RC will get set if the last command fails
 rc=$?
 if [ $rc -gt 0 ]; then
-  echo "SFTP failed to download one or both of ${bld_out} and ${bld_err} from ${server}. rc ${rc}" >&2
-  echo "${bldout_out}" >&2
-  echo "${blderr_err}" >&2
-  exit 4
+  echo "Warning: SFTP failed to download one or both of ${bld_out} and ${bld_err} from ${server}. rc ${rc}" >&2
+  vecho "SFTP output details:" >&2
+  vecho "${bldout_out}" >&2
+  vecho "${blderr_err}" >&2
+  # Don't exit - try to show what we can
 fi
 
 seconds_download=$(date '+%s')
 
-out=$(cat ${bld_out})
-if [ "${out}" != "" ]; then
-  echo "Output downloaded to ${bld_out}"
+# Extract just the filename from the remote path for local reference
+local_bld_out="${client_tmpdir}/$(basename ${bld_out})"
+local_bld_err="${client_tmpdir}/$(basename ${bld_err})"
+
+if [ -f "${local_bld_out}" ]; then
+  out=$(cat ${local_bld_out})
+  if [ "${out}" != "" ]; then
+    echo "Output downloaded to ${local_bld_out}"
+  else
+    echo "No output from build."
+  fi
 else
-  echo "No output from build."
+  echo "Warning: Output file ${local_bld_out} not found" >&2
 fi
 
-err=$(cat ${bld_err})
-if [ "${err}" != "" ]; then
-  echo "Errors downloaded to ${bld_err}"
-  echo "${err}" >&2
+if [ -f "${local_bld_err}" ]; then
+  err=$(cat ${local_bld_err})
+  if [ "${err}" != "" ]; then
+    echo "Errors downloaded to ${local_bld_err}"
+    echo "${err}" >&2
+  else
+    echo "No errors from build."
+  fi
 else
-  echo "No errors from build."
+  echo "Warning: Error file ${local_bld_err} not found" >&2
 fi
 
-reset_head ${commit} "${active_origin_url}"
-
-seconds_reset=$(date '+%s')
+seconds_finish=$(date '+%s')
 
 vecho "Finish:" $(date)
 
 vecho "Times: "
 vecho " git commit:   " $((seconds_commit-$seconds_start)) "s"
 vecho " git sync:     " $((seconds_sync-$seconds_commit)) "s"
-vecho " remote build: " $((seconds_build-$seconds_sync)) "s"
+vecho " git reset:    " $((seconds_reset-$seconds_sync)) "s"
+vecho " remote build: " $((seconds_build-$seconds_reset)) "s"
 vecho " download:     " $((seconds_download-$seconds_build)) "s"
-vecho " reset:        " $((seconds_reset-$seconds_download)) "s"
-vecho "Total time:    " $((seconds_reset-$seconds_start)) "s"
+vecho "Total time:    " $((seconds_finish-$seconds_start)) "s"
 
-if [ ${output} ]; then
-  echo "Output from ${bld_out}"
-  cat $bld_out
-  echo "Errors from ${bld_err}"
-  cat $bld_err
+if [ ${output} = "True" ]; then
+  if [ -f "${local_bld_out}" ]; then
+    echo "Output from ${local_bld_out}"
+    cat "$local_bld_out"
+  fi
+  if [ -f "${local_bld_err}" ]; then
+    echo "Errors from ${local_bld_err}"
+    cat "$local_bld_err"
+  fi
 fi
 
-
-# Clean up temporary branch if we made one
-if [ $DETACHED -gt 0 ]; then
-  # Delete locally
-  git branch -D $DETACHED_BRANCH_NAME
-fi
-
-# Clean up the remote we added
-git remote remove  "${server}_${repo}"
 
 # Use exit code of ssh command to exit script to determine overall exit code
+# Cleanup will be handled by the trap handler
 exit $ssh_command_exit
