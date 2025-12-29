@@ -10,11 +10,19 @@ repo="$2"
 active_branch="$3"
 oef_dir="$4"
 build_command="$5"
-bld_out="$6"
-bld_err="$7"
+server_name="$6"
+
+# Use TMPDIR if set, otherwise fall back to /tmp
+tmpdir="${TMPDIR:-/tmp}"
+bld_out="${tmpdir}/grub.${server_name}_${repo}.out"
+bld_err="${tmpdir}/grub.${server_name}_${repo}.err"
+
+# Echo paths back to client so it knows where to download from
+echo "GRUB_OUT=${bld_out}"
+echo "GRUB_ERR=${bld_err}"
 
 #
-# Add the oef_dir (Open Enterprise Foundation) directory 
+# Add the oef_dir (Open Enterprise Foundation) directory
 # for this server to the PATH so that bash and git can be located.
 #
 
@@ -33,9 +41,24 @@ export _TAG_REDIR_OUT=txt
 
 #
 # We call a second script to do the 'real' work and
-# redirect the stdout and stderr to files so the client 
+# redirect the stdout and stderr to files so the client
 # can then download the output
 #
 
-second_script="cd $server_root/$repo && git checkout $active_branch >/dev/null 2>&1 && $build_command"
-echo $second_script | bash >"${bld_out}" 2>"${bld_err}"
+# Change to repo directory and checkout branch
+cd "$server_root/$repo" || {
+  echo "Failed to change to directory $server_root/$repo" >&2
+  exit 4
+}
+
+git checkout "$active_branch" >/dev/null 2>&1 || {
+  echo "Failed to checkout branch $active_branch" >&2
+  exit 4
+}
+
+# Execute build command and capture output
+bash -c "$build_command" >"${bld_out}" 2>"${bld_err}"
+build_exit_code=$?
+
+# Exit with the build command's exit code
+exit $build_exit_code
