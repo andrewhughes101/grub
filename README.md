@@ -1,77 +1,129 @@
-# GRUB: git remote user build
+# GRUB: Git Remote User Build
 
-The git remote user build requires code on both the client and server, consisting of:
+Build your local git repository on a remote server without modifying your local working directory.
 
-- [grub_client](bin/grub_client): a script to drive a git remote user build from your desktop.
-- [grub_server](bin/grub_server): a script driven by *GRUB_client* on the target server.
-- [grub_server.bash](bin/grub_server.bash): a helper script driven by *GRUB_server* on the target server.
-- [tasks.json](sample/tasks.json): a sample *tasks.json* that you can optionally use for a VSCode repository build task.
-- [grub_variables.json](sample/grub_variables.json): a sample set of environment variables that you can optionally set up for a VSCode repository build task.
+## What It Does
 
-## Installation
+GRUB synchronizes your local repository (including uncommitted changes) to a remote server and runs a build command there:
 
-You need to install GRUB on the client(s) and server(s) that you want to do remote builds with.
-For example:
+1. Creates a patch file of all local changes (staged, unstaged, and untracked files)
+2. Pushes committed changes via git
+3. Transfers the patch file to the server
+4. Applies the patch on the server
+5. Runs your build command
+6. Downloads build output and errors
 
-- you have a Mac desktop and want to perform a remote build to your personal userid on z/OS
-- your Mac desktop *root* tools directory is *$HOME/Documents/tools*
-- your z/OS userid *root* tools directory is *$HOME/tools*
+**Your local git working directory is never modified.**
 
-On your Mac:
+## Quick Start
 
-- `cd $HOME/Documents/tools`
-- `git clone git@github.com:MikeFultonDev/grub.git`
-- Run `$HOME/Documents/tools/bin/grub_client` with no parameters to see the syntax of `grub_client`
+### Installation
 
-On your Mac, set up VSCode default build (Optional):
-
-- Launch VSCode
-- If you want to use *GRUB* on **multiple repositories**, you can set up a *User task* with `Cmd-Shift-P`, then choose *Open User Tasks* to create a user level task. Copy the sample [tasks.json](sample/tasks.json) into the *tasks.json* file that is available.
-across all folders and workspaces.
-- If you only want to run *GRUB* on **one repository**:
-  - Copy the sample [tasks.json](sample/tasks.json) into the *.vscode* directory of your repository. You may need to create the *.vscode* directory if you haven't done any VSCode customization of your repository yet.
-  - `Cmd-Shift-P` to bring up preferences, then choose *Tasks: Configure default build task* and choose GRUB as the default build task. You should be able to use this task as-is.
-  The task gets the GRUB variables from your preferences and combines it with some parameters it determines, such as the client directory and repo, and then calls the `grub_client` script.
-- Set your GRUB variables for VSCode
-  - Copy the contents of [grub_variables.json](sample/grub_variables.json) into the clipboard (`Cmd-a` then `Cmd-c`)
-  - `Cmd-Shift-P` to bring up preferences, then choose *Tasks: Open User Settings (JSON)* and paste the variables into your user settings file. You will need to edit the variables to reflect the parameters you want to pass to `grub_client`
-    - *grub.server_root* is the root directory on your z/OS system that you want to clone your repository to.
-    - *grub.server* is the ssh `Host` specification. See *ssh host specification* below for more details.
-    - *grub.client_build_tool* is the absolute path to [grub_client](bin/grub_client) on your Desktop.
-    - *grub.server_build_tool* is the absolute path to [grub_server](bin/grub_server) on your server.
-    - *grub.server_git_dir* is the absolute path to the `git` program on your server.
-
-On your z/OS userid:
-
-- `cd $HOME/tools`
-- `git clone git@github.com:MikeFultonDev/grub.git`
-
-## Running GRUB from the command-line
-
-- After installation, you can run the GRUB client:
-  - by adding the GRUB `bin` directory to your PATH and then issuing: `grub_client <parameters>`
-  - by running `grub_client` directly, e.g. `<GRUB-directory>/grub_client <parameters>`
-- This will perform the following steps:
-  - use *git* to synchronize the files to the server
-  - run the remote build process on the server
-  - transfer the output and errors to temporary files on your desktop
-
-## Running GRUB from VSCode
-
-- After installation
-  - Open a file from the repository you want to build in VSCode
-  - On a Mac, `Cmd-Shift-B` will launch the build and you can see the results in the terminal, as described in *Running GRUB from the command-line*.
-  - On completion, you can hover over the output file name or the error file name, `Cmd-Left-Click` and the file will be shown in your editor.
-
-## ssh host specification
-
-GRUB uses an ssh Host specification to describe the userid and server to connect to. GRUB requires that the ssh `Host` specification includes at least a `HostName` and `User` specification, defined in your `.ssh/config` file in your `$HOME` directory. For example, if you wanted to create a host called `fultonm_zos`, where your userid is `fultonm`, and your server is `zos.ibm.com`, then you would have a section in your `.ssh/config` file as follows:
-
-```(config)
-Host fultonm_zos
-  HostName zos.ibm.com
-  User fultonm
+**On your local machine:**
+```bash
+cd ~/tools
+git clone git@github.com:MikeFultonDev/grub.git
+export PATH="$HOME/tools/grub/bin:$PATH"
 ```
 
-It is strongly recommended that you configure a public/private key for communicating with the
-server so that you won't be prompted for a password when connecting to the server.
+### SSH Setup
+
+Configure SSH with public/private key authentication. Add to `~/.ssh/config`:
+
+```
+Host myserver
+  HostName server.example.com
+  User myusername
+```
+
+### Usage
+
+```bash
+cd /path/to/your/repo
+grub_client <server_root> <ssh_host> <git_path> [build_command]
+```
+
+**Example:**
+```bash
+grub_client /home/user/repos myserver /usr/bin ./build
+```
+
+**With custom repo path:**
+```bash
+grub_client --repo-path ~/projects/myapp /home/user/repos myserver /usr/bin make
+```
+
+## VSCode Integration (Optional)
+
+### 1. Create User Task
+
+Press `Cmd-Shift-P` → "Tasks: Open User Tasks" and add:
+
+```json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "GRUB Build",
+      "type": "shell",
+      "command": "${config:grub.client_build_tool}",
+      "args": [
+        "--repo-path", "${workspaceFolder}",
+        "${config:grub.server_root}",
+        "${config:grub.server}",
+        "${config:grub.server_git_dir}"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
+```
+
+### 2. Configure Settings
+
+Press `Cmd-Shift-P` → "Preferences: Open User Settings (JSON)" and add:
+
+```json
+{
+  "grub.server_root": "/home/user/repos",
+  "grub.server": "myserver",
+  "grub.client_build_tool": "/Users/you/tools/grub/bin/grub_client",
+  "grub.server_git_dir": "/usr/bin"
+}
+```
+
+### 3. Build
+
+Press `Cmd-Shift-B` to run the build. Output files are shown in the terminal.
+
+## Options
+
+```
+grub_client [options] <server_root> <server> <server_git_dir> [build_command]
+
+Options:
+  -v, --verbose        Verbose output
+  -o, --output         Print stdout/stderr from remote
+  --repo-path <path>   Repository path (default: current directory)
+  --version            Show version
+  -h, --help           Show help
+
+Arguments:
+  server_root          Remote directory for repositories
+  server               SSH host from ~/.ssh/config
+  server_git_dir       Directory containing git on server
+  build_command        Command to run (default: ./build)
+```
+
+## Environment Variables
+
+- `TMPDIR`: Temporary directory for local and remote files (default: `/tmp`)
+
+## Requirements
+
+- Git installed locally and on server
+- SSH with key-based authentication
+- Bash on server

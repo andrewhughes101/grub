@@ -11,6 +11,7 @@ active_branch="$3"
 oef_dir="$4"
 build_command="$5"
 server_name="$6"
+has_unstaged_changes="$7"
 
 # Use TMPDIR if set, otherwise fall back to /tmp
 tmpdir="${TMPDIR:-/tmp}"
@@ -51,10 +52,41 @@ cd "$server_root/$repo" || {
   exit 4
 }
 
+# Clean the working directory to ensure we can apply patches cleanly
+# This removes any unstaged changes and untracked files from previous builds
+git reset --hard HEAD >/dev/null 2>&1 || {
+  echo "Warning: Failed to reset working directory" >&2
+}
+git clean -fd >/dev/null 2>&1 || {
+  echo "Warning: Failed to clean untracked files" >&2
+}
+
 git checkout "$active_branch" >/dev/null 2>&1 || {
   echo "Failed to checkout branch $active_branch" >&2
   exit 4
 }
+
+# Apply patch file if there were unstaged changes
+if [ "$has_unstaged_changes" = "1" ]; then
+  patch_file="${tmpdir}/grub_${server_name}_${repo}.patch"
+
+  if [ -f "$patch_file" ]; then
+    # Apply the patch
+    git apply --whitespace=nowarn "$patch_file" 2>&1
+    patch_result=$?
+
+    if [ $patch_result -ne 0 ]; then
+      echo "Error: Patch application failed (exit code: $patch_result)" >&2
+      echo "This may indicate conflicts between your local changes and the remote branch" >&2
+      exit 4
+    fi
+
+    # Clean up patch file after applying
+    rm -f "$patch_file"
+  else
+    echo "Warning: Expected patch file $patch_file not found" >&2
+  fi
+fi
 
 # Execute build command and capture output
 bash -c "$build_command" >"${bld_out}" 2>"${bld_err}"
