@@ -417,7 +417,8 @@ client_dir="$(dirname "$(realpath "$0")")"
 remote_output_file="${client_tmpdir}/grub_${server}_${repo}_remote.out"
 
 cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${active_branch}" "${git_dir}" "${build_command}" "${server}" "${has_unstaged_changes}" | tee "$remote_output_file"
-ssh_command_exit=$?
+# Capture exit code of ssh command (middle of pipeline), not tee
+ssh_command_exit=${PIPESTATUS[1]}
 
 # Parse the captured output to extract the temp file paths
 bld_out=$(grep "^GRUB_OUT=" "$remote_output_file" 2>/dev/null | cut -d= -f2)
