@@ -299,7 +299,9 @@ else
 fi
 
 # Check if there are unstaged changes and create a patch file if needed
+# Remove trailing slash from TMPDIR if present
 client_tmpdir="${TMPDIR:-/tmp}"
+client_tmpdir="${client_tmpdir%/}"
 patch_file="${client_tmpdir}/grub_${server}_${repo}.patch"
 has_unstaged_changes=0
 
@@ -393,8 +395,8 @@ reset_origin_url "${active_origin_url}"
 # Transfer patch file to server if we have unstaged changes
 if [ $has_unstaged_changes -eq 1 ]; then
   vecho "Transferring patch file to server"
-  server_tmpdir="${TMPDIR:-/tmp}"
-  server_patch_file="${server_tmpdir}/grub.${server}_${repo}.patch"
+  # Use /tmp on the server
+  server_patch_file="/tmp/grub.${server}_${repo}.patch"
 
   scp -q "$patch_file" "${server}:${server_patch_file}"
   if [ $? -gt 0 ]; then
@@ -412,7 +414,6 @@ client_dir="$(dirname "$(realpath "$0")")"
 
 # Execute grub_server - stream output to terminal AND capture to temp file
 # Pass has_unstaged_changes flag to server
-client_tmpdir="${TMPDIR:-/tmp}"
 remote_output_file="${client_tmpdir}/grub_${server}_${repo}_remote.out"
 
 cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${active_branch}" "${git_dir}" "${build_command}" "${server}" "${has_unstaged_changes}" | tee "$remote_output_file"
@@ -442,9 +443,8 @@ vecho "Build complete:" $(date)
 
 #
 # Run the SFTP's in the background so they can process in parallel
-# Use TMPDIR if set, otherwise fall back to /tmp
+# client_tmpdir already set and normalized above
 #
-client_tmpdir="${TMPDIR:-/tmp}"
 bldout_out=$(sftp "${server}:${bld_out}" "${client_tmpdir}" 2>&1) &
 pid_out=$!
 blderr_err=$(sftp "${server}:${bld_err}" "${client_tmpdir}" 2>&1) &
