@@ -48,7 +48,7 @@ export _TAG_REDIR_OUT=txt
 
 # Change to repo directory and checkout branch
 cd "$server_root/$repo" || {
-  echo "Failed to change to directory $server_root/$repo" >&2
+  echo "Error: Failed to change to directory $server_root/$repo" >&2
   exit 4
 }
 
@@ -62,7 +62,7 @@ git clean -fd >/dev/null 2>&1 || {
 }
 
 git checkout "$active_branch" >/dev/null 2>&1 || {
-  echo "Failed to checkout branch $active_branch" >&2
+  echo "Error: Failed to checkout branch $active_branch" >&2
   exit 4
 }
 
@@ -88,9 +88,29 @@ if [ "$has_unstaged_changes" = "1" ]; then
   fi
 fi
 
-# Execute build command and capture output
-bash -c "$build_command" >"${bld_out}" 2>"${bld_err}"
+
+# Execute build command with buffered streaming using named pipes
+
+echo "Executing command '$build_command'"
+
+# Create named pipes for stdout and stderr
+pipe_out="${tmpdir}/grub_${server_name}_${repo}_out.pipe"
+pipe_err="${tmpdir}/grub_${server_name}_${repo}_err.pipe"
+mkfifo "$pipe_out" "$pipe_err"
+
+# Start tee processes in background to read from pipes and write to files/terminal
+tee "${bld_out}" < "$pipe_out" &
+tee "${bld_err}" < "$pipe_err" >&2 &
+
+# Run build command with output redirected to named pipes
+bash -c "$build_command" >"$pipe_out" 2>"$pipe_err"
 build_exit_code=$?
+
+# Wait for tee processes to finish
+wait
+
+# Clean up named pipes
+rm -f "$pipe_out" "$pipe_err"
 
 # Exit with the build command's exit code
 exit $build_exit_code
