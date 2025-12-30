@@ -364,8 +364,8 @@ vecho "Synchronize changes from ${repo_path} to ${server}"
 # The subsequent push --force will update HEAD, and updateInstead will update the working tree
 ssh "${server}" "cd ${server_root}/${repo} 2>/dev/null && ${git_dir}/git checkout -- . >/dev/null 2>&1 && ${git_dir}/git clean -fd >/dev/null 2>&1" 2>/dev/null || true
 
-# Try to push to remote
-push_to_remote "${server}_${repo}" $DETACHED "$DETACHED_BRANCH_NAME"
+# Try to push to remote (suppress errors if repo doesn't exist yet)
+push_to_remote "${server}_${repo}" $DETACHED "$DETACHED_BRANCH_NAME" 2>/dev/null
 
 if [ $? -gt 1 ]; then
   echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
