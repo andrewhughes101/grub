@@ -8,37 +8,56 @@
 server_root="$1"
 repo="$2"
 active_branch="$3"
-oef_dir="$4"
+git_dir="$4"
 build_command="$5"
 server_name="$6"
 has_unstaged_changes="$7"
+
+# Platform check to see if we're on z/OS
+uname_output=$(uname -s 2>/dev/null)
+if echo "$uname_output" | grep -qi "OS/390"; then
+  zos="True"
+else
+  zos="False"
+fi
+
 
 # Use TMPDIR if set, otherwise fall back to /tmp
 tmpdir="${TMPDIR:-/tmp}"
 bld_out="${tmpdir}/grub.${server_name}_${repo}.out"
 bld_err="${tmpdir}/grub.${server_name}_${repo}.err"
 
+
+# Setup z/OS tagging and auto conversion
+if [ "${zos}" = "True" ]; then
+  export _BPXK_AUTOCVT=ON
+  export _CEE_RUNOPTS="$_CEE_RUNOPTS FILETAG(AUTOCVT,AUTOTAG)"
+  export _TAG_REDIR_ERR=txt
+  export _TAG_REDIR_IN=txt
+  export _TAG_REDIR_OUT=txt
+
+  # Make the log files up front so we can tag them
+  touch "${bld_out}"
+  touch "${bld_err}"
+
+  chtag -tc ISO8859-1 "${bld_out}" 2>/dev/null || true
+  chtag -tc ISO8859-1 "${bld_err}" 2>/dev/null || true
+fi
+
 # Echo paths back to client so it knows where to download from
 echo "GRUB_OUT=${bld_out}"
 echo "GRUB_ERR=${bld_err}"
 
 #
-# Add the oef_dir (Open Enterprise Foundation) directory
-# for this server to the PATH so that bash and git can be located.
+# Add the git_dir to the PATH so that git and bash can be located
 #
 
-if [ -d "${oef_dir}" ] ; then
-  export PATH="${oef_dir}:$PATH"
+if [ -d "${git_dir}" ] ; then
+  export PATH="${git_dir}:$PATH"
 else
-  echo "Unable to set up Open Enterprise Foundation PATH with ${oef_dir}" >&2
+  echo "Unable to set up git PATH with ${git_dir}" >&2
   exit 4
 fi
-
-export _BPXK_AUTOCVT=ON
-export _CEE_RUNOPTS="$_CEE_RUNOPTS FILETAG(AUTOCVT,AUTOTAG)"
-export _TAG_REDIR_ERR=txt
-export _TAG_REDIR_IN=txt
-export _TAG_REDIR_OUT=txt
 
 #
 # We call a second script to do the 'real' work and
@@ -52,15 +71,7 @@ cd "$server_root/$repo" || {
   exit 4
 }
 
-# Clean the working directory to ensure we can apply patches cleanly
-# This removes any unstaged changes and untracked files from previous builds
-git reset --hard HEAD >/dev/null 2>&1 || {
-  echo "Warning: Failed to reset working directory" >&2
-}
-git clean -fd >/dev/null 2>&1 || {
-  echo "Warning: Failed to clean untracked files" >&2
-}
-
+# Checkout the branch (working directory was already cleaned by grub_client before push)
 git checkout "$active_branch" >/dev/null 2>&1 || {
   echo "Error: Failed to checkout branch $active_branch" >&2
   exit 4
@@ -68,7 +79,7 @@ git checkout "$active_branch" >/dev/null 2>&1 || {
 
 # Apply patch file if there were unstaged changes
 if [ "$has_unstaged_changes" = "1" ]; then
-  patch_file="${tmpdir}/grub_${server_name}_${repo}.patch"
+  patch_file="${tmpdir}/grub.${server_name}_${repo}.patch"
 
   if [ -f "$patch_file" ]; then
     # Apply the patch

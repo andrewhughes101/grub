@@ -69,9 +69,7 @@ Press `Cmd-Shift-P` → "Tasks: Open User Tasks" and add:
       "command": "${config:grub.client_build_tool}",
       "args": [
         "--repo-path", "${workspaceFolder}",
-        "${config:grub.server_root}",
-        "${config:grub.server}",
-        "${config:grub.server_git_dir}"
+        "${config:grub.server}"
       ],
       "group": {
         "kind": "build",
@@ -88,35 +86,51 @@ Press `Cmd-Shift-P` → "Preferences: Open User Settings (JSON)" and add:
 
 ```json
 {
-  "grub.server_root": "/home/user/repos",
+  "grub.server": "myserver",
+  "grub.client_build_tool": "/Users/you/tools/grub/bin/grub_client"
+}
+```
+
+Optional settings (if you need to override defaults):
+```json
+{
   "grub.server": "myserver",
   "grub.client_build_tool": "/Users/you/tools/grub/bin/grub_client",
-  "grub.server_git_dir": "/usr/bin"
+  "grub.server_root": "/u/user/projects",
+  "grub.git_dir": "/opt/git/bin"
 }
 ```
 
 ### 3. Build
 
-Press `Cmd-Shift-B` to run the build. Output files are shown in the terminal.
+Press `Cmd-Shift-B` to run the build. Output streams in real-time to the terminal.
 
 ## Options
 
 ```
-grub_client [options] <server_root> <server> <server_git_dir> [build_command]
+grub_client [options] <server> [build_command]
 
 Options:
-  -v, --verbose        Verbose output
-  -o, --output         Print stdout/stderr from remote
-  --repo-path <path>   Repository path (default: current directory)
-  --version            Show version
-  -h, --help           Show help
+  -v, --verbose              Verbose output
+  -o, --output               Print stdout/stderr from downloaded files
+  -h, --help                 Show help
+  --version                  Show version
+  --repo-path <path>         Repository path (default: current directory)
+  --server-root <path>       Remote root directory (default: ~/dev)
+  --git-dir <path>           Git directory on server (default: auto-detect)
 
 Arguments:
-  server_root          Remote directory for repositories
-  server               SSH host from ~/.ssh/config
-  server_git_dir       Directory containing git on server
-  build_command        Command to run (default: ./build)
+  server                     SSH host from ~/.ssh/config
+  build_command              Command to run (default: ./build)
 ```
+
+## Defaults
+
+- **server_root**: `~/dev` (expands to remote user's home directory)
+- **git_dir**: Auto-detected based on platform
+  - z/OS: `/usr/lpp/IBM/foz/v1r1/bin`
+  - Other: `/usr/bin`
+- **build_command**: `./build`
 
 ## Environment Variables
 

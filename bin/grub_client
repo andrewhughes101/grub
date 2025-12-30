@@ -6,41 +6,53 @@ VERSION="0.2.0"
 syntax()
 {
   echo "\
-Usage: grub_client [options] <server root> <server> <server OEF dir> [build command]
+Usage: grub_client [options] <server> [build_command]
 
 Options:
-  -v | --verbose           : print verbose output
-  -h | --help              : print this usage information
-  -o | --output            : print the stdout and stderr returned from the remote
-  --version                : print version information
-  --repo-path <path>       : path to repository (default: current directory)
+  -v | --verbose              : print verbose output
+  -h | --help                 : print this usage information
+  -o | --output               : print the stdout and stderr returned from the remote
+  --version                   : print version information
+  --repo-path <path>          : path to repository (default: current directory)
+  --server-root <path>        : remote root directory (default: ~/dev)
+  --git-dir <path>            : git directory on server (default: auto-detect by platform)
 
 Arguments:
-  server_root    : remote root directory for repositories
   server         : ssh host specification (from ~/.ssh/config)
-  server_oef_dir : Open Enterprise Foundation directory on server (contains git)
   build_command  : command to run on server (default: ./build)
 
 Examples:
-  1. Build current directory repository on remote server:
+  1. Build current directory repository (uses defaults):
      cd /path/to/myrepo
-     grub_client /u/fultonm/development fultonm_zos /usr/lpp/IBM/foz/v1r1/bin
+     grub_client myserver
 
-  2. Build specific repository:
-     grub_client --repo-path \$HOME/projects/asmdio /u/fultonm/development fultonm_zos /usr/lpp/IBM/foz/v1r1/bin
+  2. Build with custom build command:
+     grub_client myserver make
 
-  3. With custom build command:
-     grub_client /u/fultonm/development fultonm_zos /usr/lpp/IBM/foz/v1r1/bin make
+  3. Build specific repository:
+     grub_client --repo-path \$HOME/projects/myapp myserver
 
-  4. From VSCode (uses workspace folder automatically):
-     grub_client --repo-path \${workspaceFolder} /u/fultonm/development fultonm_zos /usr/lpp/IBM/foz/v1r1/bin
+  4. Override server root directory:
+     grub_client --server-root /u/user/projects myserver
+
+  5. Override git directory (for non-standard installations):
+     grub_client --git-dir /opt/git/bin myserver
+
+  6. From VSCode (uses workspace folder automatically):
+     grub_client --repo-path \${workspaceFolder} myserver
 
 Environment Variables:
   TMPDIR : temporary directory for local files (default: /tmp)
            Remote server also honors TMPDIR for its temporary files
 
+Defaults:
+  - server_root: ~/dev (expands to remote user's home directory)
+  - git_dir: /usr/lpp/IBM/foz/v1r1/bin (z/OS) or /usr/bin (other platforms)
+  - build_command: ./build
+
 Notes:
   - Repository name is automatically extracted from the path
+  - Platform detection happens on the remote server
   - grub_client uses git and ssh to communicate with the remote server
   - ssh should be configured with public/private key authentication
   - ssh Host specification must include at least HostName and User
@@ -123,6 +135,8 @@ trap cleanup EXIT INT TERM
 verbose=False
 output=False
 repo_path=""
+server_root='~/dev'  # Default to ~/dev (will expand on remote)
+git_dir=""  # Will be auto-detected if not specified
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -140,6 +154,22 @@ while [[ $# -gt 0 ]]; do
         exit 4
       fi
       repo_path="$2"
+      shift 2
+      ;;
+    --server-root)
+      if [ -z "$2" ]; then
+        echo "Error: --server-root requires a path argument" >&2
+        exit 4
+      fi
+      server_root="$2"
+      shift 2
+      ;;
+    --git-dir)
+      if [ -z "$2" ]; then
+        echo "Error: --git-dir requires a path argument" >&2
+        exit 4
+      fi
+      git_dir="$2"
       shift 2
       ;;
     -h|--help)
@@ -162,14 +192,33 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# New simplified arguments
-server_root=$1
-server=$2
-remote_oef_dir=$3
+# Parse positional arguments
+server=$1
+build_command=${2:-'./build'}
 
-if [[ $# -lt 3 || $# -gt 4 ]]; then
+vecho "Remaining arguments after option parsing: $#"
+vecho "Server: $server"
+vecho "Build command: $build_command"
+
+if [[ $# -lt 1 || $# -gt 2 ]]; then
   syntax
   exit 4
+fi
+
+# If git_dir not specified, detect it now (needed for git push configuration)
+if [ -z "$git_dir" ]; then
+  vecho "Auto-detecting git directory on remote server..."
+  # Check if remote is z/OS by looking for common z/OS indicators
+  remote_uname=$(ssh "${server}" "uname -s" 2>/dev/null)
+  if echo "$remote_uname" | grep -qi "OS/390"; then
+    git_dir="/usr/lpp/IBM/foz/v1r1/bin"
+    vecho "Detected z/OS platform, using git_dir: $git_dir"
+  else
+    git_dir="/usr/bin"
+    vecho "Detected non-z/OS platform, using git_dir: $git_dir"
+  fi
+else
+  vecho "Using specified git_dir: $git_dir"
 fi
 
 # Determine repository path
@@ -198,13 +247,6 @@ vecho "Normalized repository path: $repo_path"
 repo=$(basename "$repo_path")
 vecho "Repository name: $repo"
 
-# Set build command
-if [[ -z "$4" ]]; then
-  build_command="./build"
-else
-  build_command=$4
-fi
-
 vecho "Start:" $(date)
 seconds_start=$(date '+%s')
 
@@ -225,7 +267,7 @@ fi
 
 uploadpack=$(git config --get "remote.${server}_${repo}.uploadpack")
 if [ "${uploadpack}" = '' ]; then
-  git config --add "remote.${server}_${repo}.uploadpack" "${remote_oef_dir}/git-upload-pack"
+  git config --add "remote.${server}_${repo}.uploadpack" "${git_dir}/git-upload-pack"
   if [ $? -gt 0 ]; then
     echo "Error: Unable to add configuration for remote.${server}_${repo}.uploadpack" >&2
     exit 4
@@ -233,7 +275,7 @@ if [ "${uploadpack}" = '' ]; then
 fi
 receivepack=$(git config --get "remote.${server}_${repo}.receivepack")
 if [ "${receivepack}" = '' ]; then
-  git config --add "remote.${server}_${repo}.receivepack" "${remote_oef_dir}/git-receive-pack"
+  git config --add "remote.${server}_${repo}.receivepack" "${git_dir}/git-receive-pack"
   if [ $? -gt 0 ]; then
     echo "Error: Unable to add configuration for remote.${server}_${repo}.receive-pack" >&2
     exit 4
@@ -297,17 +339,6 @@ fi
 
 seconds_patch=$(date '+%s')
 
-git remote set-branches "${server}_${repo}" "${active_branch}" >/dev/null
-if [ $? -gt 0 ]; then
-  echo "Set up repository ${repo} on ${server_root}"
-  ssh "${server}" "mkdir -p ${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
-  git remote set-branches "${server}_${repo}" "${active_branch}" >/dev/null
-  if [ $? -gt 1 ]; then
-    reset_origin_url "${active_origin_url}"
-    exit 4
-  fi
-fi
-
 #
 # msf - If you are not using fast-forwarding, you may have to do a force-lease
 # to publish your changes to github.ibm.com
@@ -323,14 +354,20 @@ fi
 # If you get a message about 'stale info' then this might require 'git remote prune origin'
 # (msf - this particular 'git push' needs some more homework)
 #
-vecho "Synchronize changes from ${client_root} to ${server}"
+vecho "Synchronize changes from ${repo_path} to ${server}"
+
+# Clean the remote working directory before pushing to avoid rejection
+# This is needed because receive.denyCurrentBranch updateInstead requires a clean working tree
+# We only clean unstaged changes and untracked files, without touching HEAD
+# The subsequent push --force will update HEAD, and updateInstead will update the working tree
+ssh "${server}" "cd ${server_root}/${repo} 2>/dev/null && ${git_dir}/git checkout -- . >/dev/null 2>&1 && ${git_dir}/git clean -fd >/dev/null 2>&1" 2>/dev/null || true
 
 # Try to push to remote
 push_to_remote "${server}_${repo}" $DETACHED "$DETACHED_BRANCH_NAME"
 
 if [ $? -gt 1 ]; then
   echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
-  ssh "${server}" "mkdir -p ${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
+  ssh "${server}" "mkdir -p ${server_root}/${repo} && cd ${server_root}/${repo} && ${git_dir}/git init && ${git_dir}/git config --local receive.denyCurrentBranch updateInstead"
   if [ $? -gt 0 ]; then
     echo "Error: Failed to push to remote repo: ${server}_${repo} and attempt to create repository on server failed." >&2
     reset_origin_url "${active_origin_url}"
@@ -357,7 +394,7 @@ reset_origin_url "${active_origin_url}"
 if [ $has_unstaged_changes -eq 1 ]; then
   vecho "Transferring patch file to server"
   server_tmpdir="${TMPDIR:-/tmp}"
-  server_patch_file="${server_tmpdir}/grub_${server}_${repo}.patch"
+  server_patch_file="${server_tmpdir}/grub.${server}_${repo}.patch"
 
   scp -q "$patch_file" "${server}:${server_patch_file}"
   if [ $? -gt 0 ]; then
@@ -378,7 +415,7 @@ client_dir="$(dirname "$(realpath "$0")")"
 client_tmpdir="${TMPDIR:-/tmp}"
 remote_output_file="${client_tmpdir}/grub_${server}_${repo}_remote.out"
 
-cat "$client_dir/grub_server" | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "${server}" "$has_unstaged_changes" | tee "$remote_output_file"
+cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${active_branch}" "${git_dir}" "${build_command}" "${server}" "${has_unstaged_changes}" | tee "$remote_output_file"
 ssh_command_exit=$?
 
 # Parse the captured output to extract the temp file paths
@@ -452,12 +489,12 @@ seconds_finish=$(date '+%s')
 vecho "Finish:" $(date)
 
 vecho "Times: "
-vecho " patch create: " $((seconds_patch-$seconds_start)) "s"
-vecho " git sync:     " $((seconds_sync-$seconds_patch)) "s"
-vecho " patch xfer:   " $((seconds_transfer-$seconds_sync)) "s"
-vecho " remote build: " $((seconds_build-$seconds_transfer)) "s"
-vecho " download:     " $((seconds_download-$seconds_build)) "s"
-vecho "Total time:    " $((seconds_finish-$seconds_start)) "s"
+vecho " patch create:   " $((seconds_patch-$seconds_start)) "s"
+vecho " git sync:       " $((seconds_sync-$seconds_patch)) "s"
+vecho " patch transfer: " $((seconds_transfer-$seconds_sync)) "s"
+vecho " remote build:   " $((seconds_build-$seconds_transfer)) "s"
+vecho " download:       " $((seconds_download-$seconds_build)) "s"
+vecho "Total time:      " $((seconds_finish-$seconds_start)) "s"
 
 if [ ${output} = "True" ]; then
   if [ -f "${local_bld_out}" ]; then
