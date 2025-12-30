@@ -1,15 +1,18 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "GRUB",
-			"type": "shell",
-			"command": "${config:grub.client_build_tool} --repo-path ${workspaceFolder} ${config:grub.server_root} ${config:grub.server} ${config:grub.server_git_dir}",
-
-			"group": {
-				"kind": "build",
-				"isDefault": true
-			}
-		}
-	]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "GRUB Build",
+      "type": "shell",
+      "command": "${config:grub.client_build_tool}",
+      "args": [
+        "--repo-path", "${workspaceFolder}",
+        "${config:grub.server}"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
 }

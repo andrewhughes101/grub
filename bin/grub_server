@@ -79,7 +79,8 @@ git checkout "$active_branch" >/dev/null 2>&1 || {
 
 # Apply patch file if there were unstaged changes
 if [ "$has_unstaged_changes" = "1" ]; then
-  patch_file="${tmpdir}/grub.${server_name}_${repo}.patch"
+  # Patch file is in /tmp (where client puts it)
+  patch_file="/tmp/grub.${server_name}_${repo}.patch"
 
   if [ -f "$patch_file" ]; then
     # Apply the patch
