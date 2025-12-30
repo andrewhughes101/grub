@@ -55,19 +55,19 @@ reset_origin_url()
   # switch back to origin url that was active before build
   git config remote.origin.url "${active_origin_url}"
   if [ $? -gt 0 ]; then
-    echo "Problems trying to update remote.origin.url to ${active_origin_url}" >&2
+    echo "Error: Problems trying to update remote.origin.url to ${active_origin_url}" >&2
     exit 4
   fi
   git config "branch.${active_branch}.remote" "${active_origin_url}"
   if [ $? -gt 0 ]; then
-    echo "Problems trying to update branch.${active_branch}.remote to ${active_origin_url}" >&2
+    echo "Error: Problems trying to update branch.${active_branch}.remote to ${active_origin_url}" >&2
     exit 4
   fi
 }
 
 vecho()
 {
-  if [ ${verbose} ]; then
+  if [ "${verbose}" = "True" ]; then
     echo "$*"
   fi
 }
@@ -151,7 +151,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     -*)
-      echo "Unknown option: $1" >&2
+      echo "Error: Unknown option: $1" >&2
       syntax
       exit 4
       ;;
@@ -210,7 +210,7 @@ seconds_start=$(date '+%s')
 
 active_origin_url=$(git config --get remote.origin.url)
 if [ "${active_origin_url}" = '' ]; then
-  echo "Unable to retrieve current remote origin url" >&2
+  echo "Error: Unable to retrieve current remote origin url" >&2
   exit 4
 fi
 
@@ -218,7 +218,7 @@ url=$(git config --get "remote.${server}_${repo}.url")
 if [ "${url}" = '' ]; then
   git remote add "${server}_${repo}" "${server}:${server_root}/${repo}"
   if [ $? -gt 0 ]; then
-    echo "Unable to set url for ${server}_${repo}" >&2
+    echo "Error: Unable to set url for ${server}_${repo}" >&2
     exit 4
   fi
 fi
@@ -227,7 +227,7 @@ uploadpack=$(git config --get "remote.${server}_${repo}.uploadpack")
 if [ "${uploadpack}" = '' ]; then
   git config --add "remote.${server}_${repo}.uploadpack" "${remote_oef_dir}/git-upload-pack"
   if [ $? -gt 0 ]; then
-    echo "Unable to add configuration for remote.${server}_${repo}.uploadpack" >&2
+    echo "Error: Unable to add configuration for remote.${server}_${repo}.uploadpack" >&2
     exit 4
   fi
 fi
@@ -235,14 +235,14 @@ receivepack=$(git config --get "remote.${server}_${repo}.receivepack")
 if [ "${receivepack}" = '' ]; then
   git config --add "remote.${server}_${repo}.receivepack" "${remote_oef_dir}/git-receive-pack"
   if [ $? -gt 0 ]; then
-    echo "Unable to add configuration for remote.${server}_${repo}.receive-pack" >&2
+    echo "Error: Unable to add configuration for remote.${server}_${repo}.receive-pack" >&2
     exit 4
   fi
 fi
 
 # Before pushing check if we're in a detached HEAD and push a temporary branch instead
 
-git symbolic-ref -q HEAD
+git symbolic-ref -q HEAD >/dev/null 2>&1
 DETACHED=$?
 DETACHED_BRANCH_NAME="detached-head-branch"
 
@@ -332,7 +332,7 @@ if [ $? -gt 1 ]; then
   echo "Unable to push to remote - try to set up repository ${repo} on ${server_root}"
   ssh "${server}" "mkdir -p ${server_root}/${repo} && cd ${server_root}/${repo} && ${remote_oef_dir}/git init && ${remote_oef_dir}/git config --local receive.denyCurrentBranch updateInstead"
   if [ $? -gt 0 ]; then
-    echo "Failed to push to remote repo: ${server}_${repo} and attempt to create repository on server failed." >&2
+    echo "Error: Failed to push to remote repo: ${server}_${repo} and attempt to create repository on server failed." >&2
     reset_origin_url "${active_origin_url}"
     exit 4
   fi
@@ -340,7 +340,7 @@ if [ $? -gt 1 ]; then
   # Retry push after setting up repository
   push_to_remote "${server}_${repo}" $DETACHED "$DETACHED_BRANCH_NAME"
   if [ $? -gt 0 ]; then
-    echo "Unable to push to ${server}_${repo}." >&2
+    echo "Error: Unable to push to ${server}_${repo}." >&2
     reset_origin_url "${active_origin_url}"
     exit 4
   fi
@@ -361,7 +361,7 @@ if [ $has_unstaged_changes -eq 1 ]; then
 
   scp -q "$patch_file" "${server}:${server_patch_file}"
   if [ $? -gt 0 ]; then
-    echo "Failed to transfer patch file to server" >&2
+    echo "Error: Failed to transfer patch file to server" >&2
     exit 4
   fi
   vecho "Patch file transferred to ${server}:${server_patch_file}"
@@ -373,28 +373,30 @@ vecho "Patch transfer complete:" $(date)
 
 client_dir="$(dirname "$(realpath "$0")")"
 
-# Execute grub_server and capture the output to get the remote temp file paths
+# Execute grub_server - stream output to terminal AND capture to temp file
 # Pass has_unstaged_changes flag to server
-remote_output=$(cat "$client_dir/grub_server" | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "${server}" "$has_unstaged_changes")
+client_tmpdir="${TMPDIR:-/tmp}"
+remote_output_file="${client_tmpdir}/grub_${server}_${repo}_remote.out"
+
+cat "$client_dir/grub_server" | ssh "${server}" /bin/sh -s - "$server_root" "$repo" "$active_branch" "$remote_oef_dir" "$build_command" "${server}" "$has_unstaged_changes" | tee "$remote_output_file"
 ssh_command_exit=$?
 
-# Parse the output to extract the temp file paths
-bld_out=$(echo "$remote_output" | grep "^GRUB_OUT=" | cut -d= -f2)
-bld_err=$(echo "$remote_output" | grep "^GRUB_ERR=" | cut -d= -f2)
+# Parse the captured output to extract the temp file paths
+bld_out=$(grep "^GRUB_OUT=" "$remote_output_file" 2>/dev/null | cut -d= -f2)
+bld_err=$(grep "^GRUB_ERR=" "$remote_output_file" 2>/dev/null | cut -d= -f2)
+
+# Clean up the temporary output file
+rm -f "$remote_output_file"
 
 vecho "grub version: $VERSION"
 
 if [ -z "$bld_out" ] || [ -z "$bld_err" ]; then
-  echo "Failed to retrieve remote temp file paths from grub_server output" >&2
-  echo "Remote output was:" >&2
-  echo "$remote_output" >&2
+  echo "Error: Failed to retrieve remote temp file paths from grub_server output" >&2
   exit 4
 fi
 
 if [ $ssh_command_exit -gt 0 ]; then
   echo "Remote build failed with exit code $ssh_command_exit" >&2
-  vecho "Remote output:" >&2
-  vecho "$remote_output" >&2
 fi
 
 seconds_build=$(date '+%s')
