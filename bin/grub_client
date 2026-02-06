@@ -320,11 +320,19 @@ if ! git diff --exit-code --quiet || ! git diff --cached --exit-code --quiet || 
 
     # Then, add untracked files as new file patches
     git ls-files --others --exclude-standard | while read -r file; do
+      # Count lines in the file
+      line_count=$(wc -l < "$file" | tr -d ' ')
+      # Handle files with no trailing newline
+      if [ -s "$file" ] && [ "$(tail -c 1 "$file" | wc -l)" -eq 0 ]; then
+        line_count=$((line_count + 1))
+      fi
+
       echo "diff --git a/$file b/$file"
       echo "new file mode 100644"
-      echo "index 0000000..0000000"
+      echo "index 0000000000..0000000000"
       echo "--- /dev/null"
       echo "+++ b/$file"
+      echo "@@ -0,0 +1,$line_count @@"
       # Add file content with + prefix for each line
       awk '{print "+" $0}' "$file"
     done
