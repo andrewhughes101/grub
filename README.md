@@ -1,6 +1,6 @@
 # GRUB: Git Remote User Build
 
-Build your local git repository on a remote server without modifying your local working directory.
+Build your local git repository on a remote server
 
 ## What It Does
 
@@ -22,7 +22,7 @@ GRUB synchronizes your local repository (including uncommitted changes) to a rem
 **On your local machine:**
 ```bash
 cd ~/tools
-git clone git@github.com:MikeFultonDev/grub.git
+git clone git@github.com:andrewhughes101/grub.git
 export PATH="$HOME/tools/grub/bin:$PATH"
 ```
 
