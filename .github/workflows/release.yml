@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from grub_client
+        id: get_version
+        run: |
+          VERSION=$(grep '^VERSION=' bin/grub_client | cut -d'"' -f2 | cut -d'+' -f1)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          if git rev-parse "v${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create release archive
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          mkdir -p release/grub
+          cp -r bin release/grub/
+          cp README.md LICENSE release/grub/
+          cd release
+          tar -czf grub-${{ steps.get_version.outputs.version }}.tar.gz grub/
+          cd ..
+
+      - name: Create GitHub Release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: Release v${{ steps.get_version.outputs.version }}
+          body: |
+            ## Installation
+
+            ### Quick Install (Recommended)
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/andrewhughes101/grub/main/install.sh | bash
+            ```
+
+            Or with wget:
+            ```bash
+            wget -qO- https://raw.githubusercontent.com/andrewhughes101/grub/main/install.sh | bash
+            ```
+
+            ### Manual Install
+            ```bash
+            wget https://github.com/andrewhughes101/grub/releases/download/v${{ steps.get_version.outputs.version }}/grub-${{ steps.get_version.outputs.version }}.tar.gz
+            tar -xzf grub-${{ steps.get_version.outputs.version }}.tar.gz
+            export PATH="$PWD/grub/bin:$PATH"
+            ```
+
+            ### What's Included
+            - `grub_client` - Main client script
+            - `grub_server` - Server-side script
+            - `grub_remote_setup` - Remote setup script
+
+            See [README.md](https://github.com/andrewhughes101/grub/blob/main/README.md) for usage instructions.
+          files: |
+            release/grub-${{ steps.get_version.outputs.version }}.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
