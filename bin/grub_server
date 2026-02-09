@@ -41,8 +41,8 @@ if [ "${zos}" = "True" ]; then
   touch "${bld_out}"
   touch "${bld_err}"
 
-  chtag -tc ISO8859-1 "${bld_out}" 2>/dev/null || true
-  chtag -tc ISO8859-1 "${bld_err}" 2>/dev/null || true
+  chtag -b "${bld_out}" 2>/dev/null || true
+  chtag -b "${bld_err}" 2>/dev/null || true
 fi
 
 # Echo paths back to client so it knows where to download from
