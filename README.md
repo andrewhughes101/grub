@@ -19,7 +19,30 @@ GRUB synchronizes your local repository (including uncommitted changes) to a rem
 
 ### Installation
 
-**On your local machine:**
+**Recommended (one-line install):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/andrewhughes101/grub/main/install.sh | bash
+```
+
+Or with wget:
+```bash
+wget -qO- https://raw.githubusercontent.com/andrewhughes101/grub/main/install.sh | bash
+```
+
+Then add to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+```bash
+export PATH="$HOME/.grub/bin:$PATH"
+```
+
+**Alternative - Manual Installation:**
+```bash
+# Download latest release
+wget https://github.com/andrewhughes101/grub/releases/latest/download/grub-*.tar.gz
+tar -xzf grub-*.tar.gz
+export PATH="$PWD/grub/bin:$PATH"
+```
+
+**Alternative - Clone from source:**
 ```bash
 cd ~/tools
 git clone git@github.com:andrewhughes101/grub.git
