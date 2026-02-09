@@ -27,7 +27,8 @@ VERSION=$($DOWNLOAD "https://api.github.com/repos/$REPO/releases/latest" | grep 
 
 echo "Installing version $VERSION..."
 
-# Download and extract
+# Create directory and download/extract
+mkdir -p "$GRUB_DIR"
 $DOWNLOAD "https://github.com/$REPO/releases/download/v${VERSION}/grub-${VERSION}.tar.gz" | tar -xz -C "$GRUB_DIR" --strip-components=1
 
 # Make executable
