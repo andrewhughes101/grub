@@ -20,7 +20,7 @@ jobs:
       - name: Get version from grub_client
         id: get_version
         run: |
-          VERSION=$(grep '^VERSION=' bin/grub_client | cut -d'"' -f2 | cut -d'+' -f1)
+          VERSION=$(grep -E '^\s+VERSION="[0-9]' bin/grub_client | head -1 | cut -d'"' -f2 | cut -d'+' -f1)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
