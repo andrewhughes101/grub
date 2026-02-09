@@ -514,7 +514,7 @@ client_dir="$(dirname "$(realpath "$0")")"
 # Pass has_unstaged_changes flag to server
 remote_output_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}_remote.out"
 
-cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${git_dir}" "${build_command}" "${server}" "${has_unstaged_changes}" "${local_user}" | tee "$remote_output_file"
+cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${git_dir}" "${build_command}" "${server}" "${has_unstaged_changes}" "${local_user}" "${active_branch}" | tee "$remote_output_file"
 # Capture exit code of ssh command (middle of pipeline), not tee
 ssh_command_exit=${PIPESTATUS[1]}
 

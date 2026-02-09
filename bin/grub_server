@@ -12,6 +12,7 @@ build_command="$4"
 server_name="$5"
 has_unstaged_changes="$6"
 local_user="$7"
+branch="$8"
 
 # Platform check to see if we're on z/OS
 uname_output=$(uname -s 2>/dev/null)
@@ -65,9 +66,15 @@ fi
 # can then download the output
 #
 
-# Change to repo directory (branch should already be current after push)
+# Change to repo directory and checkout the correct branch
 cd "$server_root/$repo" || {
   echo "Error: Failed to change to directory $server_root/$repo" >&2
+  exit 4
+}
+
+# Checkout the branch that was pushed
+"$git_dir"/git checkout "$branch" >/dev/null 2>&1 || {
+  echo "Error: Failed to checkout branch $branch" >&2
   exit 4
 }
 
