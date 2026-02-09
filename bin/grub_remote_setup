@@ -1,0 +1,43 @@
+#!/bin/sh
+# Remote repository setup script for grub_client
+# This script is executed on the remote server via SSH
+#
+# Arguments:
+#   $1 - Repository path on remote server
+#   $2 - Git binary directory path
+
+repo_path="$1"
+git_dir="$2"
+
+# Check if .git directory exists (faster than git rev-parse)
+# Note: repo_path is already expanded by eval in grub_client
+if [ -d "$repo_path/.git" ]; then
+  # Git repository exists - clean working directory with hard reset
+  cd "$repo_path" || exit 1
+
+  # Use reset --hard to discard all changes, then clean ALL files (including ignored ones)
+  # This ensures files created by previous patches are removed
+  "$git_dir"/git reset --hard HEAD >/dev/null 2>&1 || true
+  "$git_dir"/git clean -fdx >/dev/null 2>&1 || true
+
+  # Only set git config if not already configured
+  current_compression=$("$git_dir"/git config --local core.compression 2>/dev/null)
+  if [ "$current_compression" != "6" ]; then
+    "$git_dir"/git config --local core.compression 6 && \
+    "$git_dir"/git config --local pack.compression 6 && \
+    "$git_dir"/git config --local protocol.version 2 && \
+    echo "REPO_CLEANED_CONFIGURED"
+  else
+    echo "REPO_CLEANED"
+  fi
+else
+  # Repository does not exist or is not a git repository - create, initialize, and configure
+  mkdir -p "$repo_path" && \
+  cd "$repo_path" && \
+  "$git_dir"/git init && \
+  "$git_dir"/git config --local receive.denyCurrentBranch updateInstead && \
+  "$git_dir"/git config --local core.compression 6 && \
+  "$git_dir"/git config --local pack.compression 6 && \
+  "$git_dir"/git config --local protocol.version 2 && \
+  echo "REPO_CREATED" || echo "CREATE_FAILED"
+fi
