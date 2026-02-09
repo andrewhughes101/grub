@@ -548,23 +548,19 @@ seconds_build=$(date '+%s')
 vecho "Build complete:" $(date)
 
 #
-# Download build output files using compressed SCP (binary mode for z/OS compatibility)
-# Binary mode (-B) prevents encoding issues with UTF-8 characters
-# Compression (-C) reduces transfer time significantly on z/OS
+# Download build output files using ssh+cat to avoid z/OS scp auto-conversion issues
+# This bypasses scp's automatic EBCDIC-to-ASCII conversion which can scramble UTF-8 files
 # client_tmpdir already set and normalized above
 #
-vecho "Downloading build output files (compressed SCP, binary mode)..."
-bldout_out=$(scp -C -B -q "${server}:${bld_out}" "${client_tmpdir}/" 2>&1) &
+vecho "Downloading build output files (via ssh+cat)..."
+ssh "${server}" "cat ${bld_out}" > "${client_tmpdir}/$(basename "${bld_out}")" 2>/dev/null &
 pid_out=$!
-blderr_err=$(scp -C -B -q "${server}:${bld_err}" "${client_tmpdir}/" 2>&1) &
+ssh "${server}" "cat ${bld_err}" > "${client_tmpdir}/$(basename "${bld_err}")" 2>/dev/null &
 pid_err=$!
-wait ${pid_out} ${pid_err} # put the specific jobs in so that the RC will get set if the last command fails
+wait ${pid_out} ${pid_err}
 rc=$?
 if [ $rc -gt 0 ]; then
-  echo "Warning: SCP failed to download one or both of ${bld_out} and ${bld_err} from ${server}. rc ${rc}" >&2
-  vecho "SCP output details:" >&2
-  vecho "${bldout_out}" >&2
-  vecho "${blderr_err}" >&2
+  echo "Warning: Failed to download one or both of ${bld_out} and ${bld_err} from ${server}. rc ${rc}" >&2
   # Don't exit - try to show what we can
 fi
 
