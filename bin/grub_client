@@ -127,12 +127,19 @@ cleanup()
   # Don't call exit here - just do cleanup and return
   # The original exit code will be preserved
 
-  # Note: Git remote and temporary branch are cleaned up before the remote build
-  # This trap handler only cleans up the patch file as a safety net
-
   # Clean up local patch file if it exists
   if [ -n "$patch_file" ] && [ -f "$patch_file" ]; then
     rm -f "$patch_file" 2>/dev/null || true
+  fi
+
+  # Clean up temporary branch if we made one
+  if [ -n "$DETACHED" ] && [ $DETACHED -gt 0 ] && [ -n "$DETACHED_BRANCH_NAME" ]; then
+    git branch -D $DETACHED_BRANCH_NAME 2>/dev/null || true
+  fi
+
+  # Clean up the remote we added
+  if [ -n "$server" ] && [ -n "$repo" ]; then
+    git remote remove "${server}_${repo}" 2>/dev/null || true
   fi
 }
 
@@ -287,31 +294,8 @@ if [ "${active_origin_url}" = '' ]; then
   exit 4
 fi
 
-url=$(git config --get "remote.${server}_${repo}.url")
-if [ "${url}" = '' ]; then
-  git remote add "${server}_${repo}" "${server}:${server_root}/${repo}"
-  if [ $? -gt 0 ]; then
-    echo "Error: Unable to set url for ${server}_${repo}" >&2
-    exit 4
-  fi
-fi
-
-uploadpack=$(git config --get "remote.${server}_${repo}.uploadpack")
-if [ "${uploadpack}" = '' ]; then
-  git config --add "remote.${server}_${repo}.uploadpack" "${git_dir}/git-upload-pack"
-  if [ $? -gt 0 ]; then
-    echo "Error: Unable to add configuration for remote.${server}_${repo}.uploadpack" >&2
-    exit 4
-  fi
-fi
-receivepack=$(git config --get "remote.${server}_${repo}.receivepack")
-if [ "${receivepack}" = '' ]; then
-  git config --add "remote.${server}_${repo}.receivepack" "${git_dir}/git-receive-pack"
-  if [ $? -gt 0 ]; then
-    echo "Error: Unable to add configuration for remote.${server}_${repo}.receive-pack" >&2
-    exit 4
-  fi
-fi
+# Note: Git remote configuration will be set up after grub_remote_setup
+# so we can use the expanded server_root path from the remote
 
 # Before pushing check if we're in a detached HEAD and push a temporary branch instead
 
@@ -406,6 +390,54 @@ batch_result=$(cat "${script_dir}/grub_remote_setup" | ssh "${server}" "eval sh 
 
 batch_status=$?
 
+# Extract the expanded path from the remote setup output
+expanded_server_root=$(echo "$batch_result" | grep "^EXPANDED_PATH=" | cut -d= -f2)
+if [ -z "$expanded_server_root" ]; then
+  echo "Error: Failed to get expanded path from remote setup" >&2
+  exit 4
+fi
+
+# Extract just the parent directory (remove the repo name)
+expanded_server_root=$(dirname "$expanded_server_root")
+vecho "Using expanded server_root: $expanded_server_root"
+
+# Now set up git remote configuration with the expanded path
+url=$(git config --get "remote.${server}_${repo}.url")
+if [ "${url}" = '' ]; then
+  git remote add "${server}_${repo}" "${server}:${expanded_server_root}/${repo}"
+  if [ $? -gt 0 ]; then
+    echo "Error: Unable to set url for ${server}_${repo}" >&2
+    exit 4
+  fi
+else
+  # Update existing remote URL if it differs
+  expected_url="${server}:${expanded_server_root}/${repo}"
+  if [ "${url}" != "${expected_url}" ]; then
+    git remote set-url "${server}_${repo}" "${expected_url}"
+    if [ $? -gt 0 ]; then
+      echo "Error: Unable to update url for ${server}_${repo}" >&2
+      exit 4
+    fi
+  fi
+fi
+
+uploadpack=$(git config --get "remote.${server}_${repo}.uploadpack")
+if [ "${uploadpack}" = '' ]; then
+  git config --add "remote.${server}_${repo}.uploadpack" "${git_dir}/git-upload-pack"
+  if [ $? -gt 0 ]; then
+    echo "Error: Unable to add configuration for remote.${server}_${repo}.uploadpack" >&2
+    exit 4
+  fi
+fi
+receivepack=$(git config --get "remote.${server}_${repo}.receivepack")
+if [ "${receivepack}" = '' ]; then
+  git config --add "remote.${server}_${repo}.receivepack" "${git_dir}/git-receive-pack"
+  if [ $? -gt 0 ]; then
+    echo "Error: Unable to add configuration for remote.${server}_${repo}.receive-pack" >&2
+    exit 4
+  fi
+fi
+
 # Check if batched operation succeeded
 if [ $batch_status -eq 0 ] && echo "$batch_result" | grep -qE "REPO_CLEANED|REPO_CREATED"; then
   # Golden path succeeded!
@@ -497,22 +529,7 @@ seconds_transfer=$(date '+%s')
 
 vecho "Patch transfer complete:" $(date)
 
-# Clean up local git state before starting remote build
-vecho "Cleaning up local git state..."
-
-# Clean up temporary branch if we made one
-if [ -n "$DETACHED" ] && [ $DETACHED -gt 0 ] && [ -n "$DETACHED_BRANCH_NAME" ]; then
-  git branch -D $DETACHED_BRANCH_NAME 2>/dev/null || true
-  vecho "Removed temporary branch: $DETACHED_BRANCH_NAME"
-fi
-
-# Clean up the remote we added
-if [ -n "$server" ] && [ -n "$repo" ]; then
-  git remote remove "${server}_${repo}" 2>/dev/null || true
-  vecho "Removed git remote: ${server}_${repo}"
-fi
-
-# Note: patch_file cleanup still handled by trap (needed until after build)
+# Note: Git cleanup (remote, branch, patch) will be handled by trap on exit
 
 client_dir="$(dirname "$(realpath "$0")")"
 

@@ -3,11 +3,17 @@
 # This script is executed on the remote server via SSH
 #
 # Arguments:
-#   $1 - Repository path on remote server
+#   $1 - Repository path on remote server (may contain ~)
 #   $2 - Git binary directory path
 
 repo_path="$1"
 git_dir="$2"
+
+# Expand ~ if present and output the expanded path for client to use
+# This must be the first output so client can capture it
+eval expanded_path="$repo_path"
+echo "EXPANDED_PATH=$expanded_path"
+repo_path="$expanded_path"
 
 # Check if .git directory exists (faster than git rev-parse)
 # Note: repo_path is already expanded by eval in grub_client
