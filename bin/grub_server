@@ -28,6 +28,11 @@ tmpdir="${TMPDIR:-/tmp}"
 bld_out="${tmpdir}/grub.${local_user}_${server_name}_${repo}.out"
 bld_err="${tmpdir}/grub.${local_user}_${server_name}_${repo}.err"
 
+# Delete old log files to prevent displaying stale output from previous runs
+# This is critical when patch application fails - we don't want to show
+# old successful build output when the current build didn't actually run
+rm "${bld_out}" 2>/dev/null || true
+rm "${bld_err}" 2>/dev/null || true
 
 # Setup z/OS tagging and auto conversion
 if [ "${zos}" = "True" ]; then
