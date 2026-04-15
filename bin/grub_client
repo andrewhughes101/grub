@@ -6,9 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GRUB_ROOT="$(dirname "$SCRIPT_DIR")"
 GIT_HASH=$(cd "$GRUB_ROOT" && git rev-parse --short=7 HEAD 2>/dev/null)
 if [ -n "$GIT_HASH" ]; then
-  VERSION="0.2.1+${GIT_HASH}"
+  VERSION="0.2.2+${GIT_HASH}"
 else
-  VERSION="0.2.1"
+  VERSION="0.2.2"
 fi
 
 syntax()
