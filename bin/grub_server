@@ -89,9 +89,39 @@ if [ "$has_unstaged_changes" = "1" ]; then
   patch_file="/tmp/grub.${local_user}_${server_name}_${repo}.patch"
 
   if [ -f "$patch_file" ]; then
-    # Apply the patch
-    git apply --whitespace=nowarn "$patch_file" 2>&1
-    patch_result=$?
+    # On z/OS with zos-working-tree-encoding, use 3-way merge to handle encoding differences
+    # The patch is in ascii (from client), but working tree files may be in IBM-1047
+    if [ "${zos}" = "True" ]; then
+      # Tag patch as ascii for proper reading
+      chtag -tc iso8859-1 "$patch_file" 2>/dev/null || true
+
+      # Extract list of files from the patch before applying
+      modified_files=$(grep -E '^\+\+\+ [bw]/' "$patch_file" | sed 's|^+++ [bw]/||' | sort -u)
+
+      # Use 3-way merge which can handle the encoding mismatch
+      "$git_dir"/git apply --3way --whitespace=nowarn "$patch_file" 2>&1
+      patch_result=$?
+
+      if [ $patch_result -eq 0 ]; then
+        # After 3-way merge, files have correct content but may have wrong encoding tags
+        # Fix the tags based on .gitattributes zos-working-tree-encoding
+        echo "$modified_files" | while read -r file; do
+          if [ -n "$file" ] && [ -f "$file" ]; then
+            # Get the expected encoding from .gitattributes
+            expected_encoding=$("$git_dir"/git check-attr zos-working-tree-encoding -- "$file" | cut -d: -f3 | tr -d ' ')
+
+            # Re-tag the file with the correct encoding
+            if [ "$expected_encoding" != "unspecified" ] && [ "$expected_encoding" != "unset" ]; then
+              chtag -tc "$expected_encoding" "$file" 2>/dev/null || true
+            fi
+          fi
+        done
+      fi
+    else
+      # Non-z/OS: standard apply
+      "$git_dir"/git apply --whitespace=nowarn "$patch_file" 2>&1
+      patch_result=$?
+    fi
 
     if [ $patch_result -ne 0 ]; then
       echo "Error: Patch application failed (exit code: $patch_result)" >&2
