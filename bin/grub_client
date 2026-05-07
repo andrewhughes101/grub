@@ -132,6 +132,11 @@ cleanup()
     rm -f "$patch_file" 2>/dev/null || true
   fi
 
+  # Clean up remote patch file if it exists
+  if [ -n "$server" ] && [ -n "$remote_patch_file" ]; then
+    ssh "${server}" "rm -f ${remote_patch_file}" 2>/dev/null || true
+  fi
+
   # Clean up temporary branch if we made one
   if [ -n "$DETACHED" ] && [ $DETACHED -gt 0 ] && [ -n "$DETACHED_BRANCH_NAME" ]; then
     git branch -D $DETACHED_BRANCH_NAME 2>/dev/null || true
@@ -288,6 +293,10 @@ vecho "Repository name: $repo"
 vecho "Start:" $(date)
 seconds_start=$(date '+%s')
 
+# Generate a unique run identifier for this build - used throughout the entire flow
+run_id="$(date +%Y%m%d_%H%M%S)_$$"
+vecho "Run ID: $run_id"
+
 active_origin_url=$(git config --get remote.origin.url)
 if [ "${active_origin_url}" = '' ]; then
   echo "Error: Unable to retrieve current remote origin url" >&2
@@ -319,7 +328,7 @@ client_tmpdir="${TMPDIR:-/tmp}"
 client_tmpdir="${client_tmpdir%/}"
 # Include username in filename to prevent clashes between users
 local_user=$(whoami)
-patch_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}.patch"
+patch_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}.${run_id}.patch"
 has_unstaged_changes=0
 
 # Quick change detection before creating patch
@@ -385,17 +394,26 @@ echo "Preparing remote repository..." >&2
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 
 # Execute the remote setup script via SSH
+# Pass run_id to remote setup so it can use the same identifier
 # Use eval on remote to expand ~ in server_root
-batch_result=$(cat "${script_dir}/grub_remote_setup" | ssh "${server}" "eval sh -s -- ${server_root}/${repo} '${git_dir}'" 2>&1)
+batch_result=$(cat "${script_dir}/grub_remote_setup" | ssh "${server}" "eval sh -s -- ${server_root}/${repo} '${git_dir}' '${run_id}'" 2>&1)
 
 batch_status=$?
 
-# Extract the expanded path from the remote setup output
+# Extract values from the remote setup output
+remote_tmpdir=$(echo "$batch_result" | grep "^REMOTE_TMPDIR=" | cut -d= -f2)
 expanded_server_root=$(echo "$batch_result" | grep "^EXPANDED_PATH=" | cut -d= -f2)
+
+if [ -z "$remote_tmpdir" ]; then
+  echo "Error: Failed to get remote TMPDIR from remote setup" >&2
+  exit 4
+fi
 if [ -z "$expanded_server_root" ]; then
   echo "Error: Failed to get expanded path from remote setup" >&2
   exit 4
 fi
+
+vecho "Remote TMPDIR: $remote_tmpdir"
 
 # Extract just the parent directory (remove the repo name)
 expanded_server_root=$(dirname "$expanded_server_root")
@@ -514,15 +532,15 @@ reset_origin_url "${active_origin_url}"
 # Transfer patch file to server if we have unstaged changes
 if [ $has_unstaged_changes -eq 1 ]; then
   vecho "Transferring patch file to server (compressed)"
-  # Use /tmp on the server - include username to prevent clashes
-  server_patch_file="/tmp/grub.${local_user}_${server}_${repo}.patch"
+  # Use remote TMPDIR with unique run ID
+  remote_patch_file="${remote_tmpdir}/grub.${local_user}_${server}_${repo}.${run_id}.patch"
 
-  scp -C -q "$patch_file" "${server}:${server_patch_file}"
+  scp -C -q "$patch_file" "${server}:${remote_patch_file}"
   if [ $? -gt 0 ]; then
     echo "Error: Failed to transfer patch file to server" >&2
     exit 4
   fi
-  vecho "Patch file transferred to ${server}:${server_patch_file}"
+  vecho "Patch file transferred to ${server}:${remote_patch_file}"
 fi
 
 seconds_transfer=$(date '+%s')
@@ -535,9 +553,9 @@ client_dir="$(dirname "$(realpath "$0")")"
 
 # Execute grub_server - stream output to terminal and capture to temp file
 # Pass has_unstaged_changes flag to server
-remote_output_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}_remote.out"
+remote_output_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}.${run_id}_remote.out"
 
-cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${git_dir}" "${build_command}" "${server}" "${has_unstaged_changes}" "${local_user}" "${active_branch}" | tee "$remote_output_file"
+cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${git_dir}" "${build_command}" "${server}" "${has_unstaged_changes}" "${local_user}" "${active_branch}" "${remote_tmpdir}" "${run_id}" | tee "$remote_output_file"
 # Capture exit code of ssh command (middle of pipeline), not tee
 ssh_command_exit=${PIPESTATUS[1]}
 
@@ -579,6 +597,10 @@ rc=$?
 if [ $rc -gt 0 ]; then
   echo "Warning: Failed to download one or both of ${bld_out} and ${bld_err} from ${server}. rc ${rc}" >&2
   # Don't exit - try to show what we can
+else
+  # Successfully downloaded - clean up remote log files
+  vecho "Cleaning up remote log files..."
+  ssh "${server}" "rm -f ${bld_out} ${bld_err}" 2>/dev/null || true
 fi
 
 seconds_download=$(date '+%s')

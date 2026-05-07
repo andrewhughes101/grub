@@ -13,6 +13,8 @@ server_name="$5"
 has_unstaged_changes="$6"
 local_user="$7"
 branch="$8"
+remote_tmpdir="$9"
+run_id="${10}"
 
 # Platform check to see if we're on z/OS
 uname_output=$(uname -s 2>/dev/null)
@@ -22,17 +24,18 @@ else
   zos="False"
 fi
 
+# Use remote_tmpdir passed from client (which honors remote $TMPDIR)
+tmpdir="$remote_tmpdir"
 
-# Use TMPDIR if set, otherwise fall back to /tmp
-tmpdir="${TMPDIR:-/tmp}"
-bld_out="${tmpdir}/grub.${local_user}_${server_name}_${repo}.out"
-bld_err="${tmpdir}/grub.${local_user}_${server_name}_${repo}.err"
+# Create unique log files for this run using the run_id from client
+bld_out="${tmpdir}/grub.${local_user}_${server_name}_${repo}.${run_id}.out"
+bld_err="${tmpdir}/grub.${local_user}_${server_name}_${repo}.${run_id}.err"
 
-# Delete old log files to prevent displaying stale output from previous runs
-# This is critical when patch application fails - we don't want to show
-# old successful build output when the current build didn't actually run
-rm "${bld_out}" 2>/dev/null || true
-rm "${bld_err}" 2>/dev/null || true
+# Set up cleanup trap for this run
+cleanup_server() {
+  rm -f "$pipe_out" "$pipe_err" 2>/dev/null || true
+}
+trap cleanup_server EXIT INT TERM
 
 # Setup z/OS tagging and auto conversion
 if [ "${zos}" = "True" ]; then
@@ -85,8 +88,8 @@ cd "$server_root/$repo" || {
 
 # Apply patch file if there were unstaged changes
 if [ "$has_unstaged_changes" = "1" ]; then
-  # Patch file is in /tmp (where client puts it)
-  patch_file="/tmp/grub.${local_user}_${server_name}_${repo}.patch"
+  # Patch file is in remote TMPDIR with unique run ID
+  patch_file="${tmpdir}/grub.${local_user}_${server_name}_${repo}.${run_id}.patch"
 
   if [ -f "$patch_file" ]; then
     # On z/OS with zos-working-tree-encoding, use 3-way merge to handle encoding differences
@@ -141,9 +144,9 @@ fi
 
 echo "Executing command '$build_command'"
 
-# Create named pipes for stdout and stderr
-pipe_out="${tmpdir}/grub_${server_name}_${repo}_out.pipe"
-pipe_err="${tmpdir}/grub_${server_name}_${repo}_err.pipe"
+# Create named pipes for stdout and stderr with unique run ID
+pipe_out="${tmpdir}/grub_${server_name}_${repo}_${run_id}_out.pipe"
+pipe_err="${tmpdir}/grub_${server_name}_${repo}_${run_id}_err.pipe"
 mkfifo "$pipe_out" "$pipe_err"
 
 # Start tee processes in background to read from pipes and write to files/terminal
