@@ -401,13 +401,9 @@ batch_result=$(cat "${script_dir}/grub_remote_setup" | ssh "${server}" "eval sh 
 batch_status=$?
 
 # Extract values from the remote setup output
-remote_tmpdir=$(echo "$batch_result" | grep "^REMOTE_TMPDIR=" | cut -d= -f2)
+remote_tmpdir=${$(echo "$batch_result" | grep "^REMOTE_TMPDIR=" | cut -d= -f2):-/tmp}
 expanded_server_root=$(echo "$batch_result" | grep "^EXPANDED_PATH=" | cut -d= -f2)
 
-if [ -z "$remote_tmpdir" ]; then
-  echo "Error: Failed to get remote TMPDIR from remote setup" >&2
-  exit 4
-fi
 if [ -z "$expanded_server_root" ]; then
   echo "Error: Failed to get expanded path from remote setup" >&2
   exit 4
