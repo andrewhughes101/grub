@@ -102,7 +102,7 @@ if [ "$has_unstaged_changes" = "1" ]; then
       modified_files=$(grep -E '^\+\+\+ [bw]/' "$patch_file" | sed 's|^+++ [bw]/||' | sort -u)
 
       # Use 3-way merge which can handle the encoding mismatch
-      "$git_dir"/git apply --3way --whitespace=nowarn "$patch_file" 2>&1
+      "$git_dir"/git apply --3way --whitespace=nowarn --allow-empty "$patch_file" 2>&1
       patch_result=$?
 
       if [ $patch_result -eq 0 ]; then
@@ -122,7 +122,7 @@ if [ "$has_unstaged_changes" = "1" ]; then
       fi
     else
       # Non-z/OS: standard apply
-      "$git_dir"/git apply --whitespace=nowarn "$patch_file" 2>&1
+      "$git_dir"/git apply --whitespace=nowarn --allow-empty "$patch_file" 2>&1
       patch_result=$?
     fi
 
