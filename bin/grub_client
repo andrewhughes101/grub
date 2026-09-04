@@ -396,6 +396,8 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 # Execute the remote setup script via SSH
 # Pass run_id to remote setup so it can use the same identifier
 # Use eval on remote to expand ~ in server_root
+vecho "Requested remote repository path: ${server_root}/${repo}"
+vecho "Remote setup git_dir: ${git_dir}"
 batch_result=$(cat "${script_dir}/grub_remote_setup" | ssh "${server}" "eval sh -s -- ${server_root}/${repo} '${git_dir}' '${run_id}'" 2>&1)
 
 batch_status=$?
@@ -407,6 +409,7 @@ expanded_server_root=$(echo "$batch_result" | grep "^EXPANDED_PATH=" | cut -d= -
 
 if [ -z "$expanded_server_root" ]; then
   echo "Error: Failed to get expanded path from remote setup" >&2
+  [ -n "$batch_result" ] && echo "$batch_result" >&2
   exit 4
 fi
 
@@ -552,7 +555,10 @@ client_dir="$(dirname "$(realpath "$0")")"
 # Pass has_unstaged_changes flag to server
 remote_output_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}.${run_id}_remote.out"
 
-cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${git_dir}" "${build_command}" "${server}" "${has_unstaged_changes}" "${local_user}" "${active_branch}" "${remote_tmpdir}" "${run_id}" | tee "$remote_output_file"
+# Shell-quote build_command so that spaces/special chars don't word-split when
+# SSH joins all arguments into a single remote shell command string.
+build_command_quoted=$(printf '%q' "${build_command}")
+cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${git_dir}" "${build_command_quoted}" "${server}" "${has_unstaged_changes}" "${local_user}" "${active_branch}" "${remote_tmpdir}" "${run_id}" | tee "$remote_output_file"
 # Capture exit code of ssh command (middle of pipeline), not tee
 ssh_command_exit=${PIPESTATUS[1]}
 
