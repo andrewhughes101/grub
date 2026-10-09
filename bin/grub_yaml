@@ -1,0 +1,187 @@
+#!/bin/sh
+# grub_yaml: minimal YAML key lookup for grub_client
+#
+# No external dependencies beyond awk and sed (both available on z/OS UNIX).
+# Supports two formats:
+#   1. Flat host_vars file:   grub_yaml_get_flat <file> <key>
+#   2. Ansible inventory file: grub_yaml_get_host <file> <host> <key>
+#
+# Supported YAML subset:
+#   - key: value
+#   - key: "double quoted value"
+#   - key: 'single quoted value'
+#   - key:            (empty value)
+#   - # comment lines (ignored)
+#   - inline comments stripped
+#
+# NOT supported: anchors, aliases, multi-line values, lists, nested maps
+# beyond the two-level all.hosts.<hostname> structure used by Ansible.
+
+# ---------------------------------------------------------------------------
+# grub_yaml_strip_value <raw>
+#   Strip leading/trailing whitespace, inline comments, and surrounding quotes
+#   from a raw YAML value string. Prints the cleaned value.
+# ---------------------------------------------------------------------------
+grub_yaml_strip_value() {
+  echo "$1" \
+    | sed 's/[[:space:]]*#[^"'"'"']*$//' \
+    | sed "s/^[[:space:]]*//;s/[[:space:]]*$//" \
+    | sed "s/^'\(.*\)'$/\1/" \
+    | sed 's/^"\(.*\)"$/\1/'
+}
+
+# ---------------------------------------------------------------------------
+# grub_yaml_get_flat <file> <key>
+#   Read a single key from a flat (host_vars-style) YAML file.
+#   Prints the value, or empty string if not found.
+# ---------------------------------------------------------------------------
+grub_yaml_get_flat() {
+  _gyf_file="$1"
+  _gyf_key="$2"
+
+  if [ ! -f "$_gyf_file" ]; then
+    return 1
+  fi
+
+  _gyf_raw=$(grep -m1 "^[[:space:]]*${_gyf_key}[[:space:]]*:" "$_gyf_file" \
+    | sed "s/^[[:space:]]*${_gyf_key}[[:space:]]*:[[:space:]]*//" )
+
+  if [ -z "$_gyf_raw" ] && ! grep -q "^[[:space:]]*${_gyf_key}[[:space:]]*:" "$_gyf_file"; then
+    return 1
+  fi
+
+  grub_yaml_strip_value "$_gyf_raw"
+}
+
+# ---------------------------------------------------------------------------
+# grub_yaml_iter_flat <file>
+#   Iterate all key/value pairs in a flat YAML file.
+#   Prints one "KEY=value" line per entry (value is single-quote-escaped shell safe).
+#   Skips blank lines and comments. Returns 1 if file not found.
+#   Caller is responsible for key validation.
+# ---------------------------------------------------------------------------
+grub_yaml_iter_flat() {
+  _gyif_file="$1"
+
+  if [ ! -f "$_gyif_file" ]; then
+    return 1
+  fi
+
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+    !/:/             { next }
+    {
+      # Split on first colon only
+      colon = index($0, ":")
+      key   = substr($0, 1, colon - 1)
+      val   = substr($0, colon + 1)
+
+      # Trim whitespace from key
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      # Trim whitespace and inline comment from value
+      gsub(/^[[:space:]]+/, "", val)
+      gsub(/[[:space:]]*#[^"'"'"']*$/, "", val)
+      gsub(/[[:space:]]+$/, "", val)
+      # Strip surrounding quotes
+      if (match(val, /^'"'"'.*'"'"'$/)) val = substr(val, 2, length(val)-2)
+      if (match(val, /^".*"$/))         val = substr(val, 2, length(val)-2)
+
+      # Emit KEY=single-quoted-value (escape any single quotes in value)
+      gsub(/'"'"'/, "'\''\\'\'''\''", val)
+      printf "%s='\''%s'\''\n", key, val
+    }
+  ' "$_gyif_file"
+}
+
+# ---------------------------------------------------------------------------
+# grub_yaml_get_host <file> <host> <key>
+#   Read a single key from an Ansible inventory YAML file for a named host.
+#   Locates the host name as a mapping key, then reads indented vars beneath
+#   it until indentation returns to the host level or above.
+#   Prints the value, or empty string if not found.
+#
+#   Handles both common inventory shapes:
+#     all:
+#       hosts:
+#         myhost:
+#           key: value
+#   and group-level hosts:
+#     mygroup:
+#       hosts:
+#         myhost:
+#           key: value
+# ---------------------------------------------------------------------------
+grub_yaml_get_host() {
+  _gyh_file="$1"
+  _gyh_host="$2"
+  _gyh_key="$3"
+
+  if [ ! -f "$_gyh_file" ]; then
+    return 1
+  fi
+
+  awk -v host="$_gyh_host" -v key="$_gyh_key" '
+    # Count leading spaces to determine indent level
+    function indent(line,    i, n) {
+      n = 0
+      for (i = 1; i <= length(line); i++) {
+        if (substr(line, i, 1) == " ") n++
+        else break
+      }
+      return n
+    }
+
+    # Strip surrounding quotes and inline comments from a value string
+    function strip(val,    v) {
+      # strip inline comment (not inside quotes - good enough for host vars)
+      gsub(/[[:space:]]*#[^"'"'"']*$/, "", val)
+      # trim whitespace
+      gsub(/^[[:space:]]+/, "", val)
+      gsub(/[[:space:]]+$/, "", val)
+      # strip single quotes
+      if (match(val, /^'"'"'.*'"'"'$/)) { val = substr(val, 2, length(val)-2) }
+      # strip double quotes
+      if (match(val, /^".*"$/))         { val = substr(val, 2, length(val)-2) }
+      return val
+    }
+
+    /^[[:space:]]*#/ { next }   # skip comment lines
+    /^[[:space:]]*$/ { next }   # skip blank lines
+
+    # Detect host entry: line whose trimmed content is "hostname:"
+    !in_host {
+      if (match($0, "^[[:space:]]*" host "[[:space:]]*:")) {
+        host_indent = indent($0)
+        in_host = 1
+      }
+      next
+    }
+
+    # Inside host block
+    in_host {
+      cur_indent = indent($0)
+      # If we have returned to host indent level or above, we are done
+      if (cur_indent <= host_indent) { exit }
+
+      # Only process direct children (one level deeper than the host line)
+      # Ansible host vars sit at host_indent + N spaces; we want all k:v pairs
+      # at any depth would be wrong, but host vars are always direct children.
+      # Accept lines at exactly (host_indent + any positive amount) with a colon.
+      if (match($0, "^[[:space:]]*" key "[[:space:]]*:")) {
+        # Extract value after the colon
+        split($0, parts, ":")
+        # Rejoin from part 2 onward (value may contain colons, e.g. URLs)
+        val = ""
+        for (i = 2; i <= length(parts); i++) {
+          val = val (i > 2 ? ":" : "") parts[i]
+        }
+        print strip(val)
+        found = 1
+        exit
+      }
+    }
+
+    END { exit (found ? 0 : 1) }
+  ' "$_gyh_file"
+}

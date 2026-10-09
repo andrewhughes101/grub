@@ -4,6 +4,9 @@
 # Get git hash from GRUB's directory, not the user's current directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GRUB_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Source the YAML parser (grub_yaml_get_flat, grub_yaml_get_host)
+. "${SCRIPT_DIR}/grub_yaml"
 GIT_HASH=$(cd "$GRUB_ROOT" && git rev-parse --short=7 HEAD 2>/dev/null)
 if [ -n "$GIT_HASH" ]; then
   VERSION="0.2.5+${GIT_HASH}"
@@ -24,11 +27,38 @@ Options:
   --repo-path <path>          : path to repository (default: current directory)
   --server-root <path>        : remote root directory (default: ~/dev)
   --git-dir <path>            : git directory on server (default: auto-detect by platform)
+  --inventory <file>          : Ansible inventory file to read host variables from
+  -e | --extra-vars <file>    : YAML file of variables to set as env vars during build
   --clear-cache <server>      : clear cached git directory for specified server
 
 Arguments:
-  server         : ssh host specification (from ~/.ssh/config)
+  server         : ssh host specification (name must match host in inventory or ~/.ssh/config)
   build_command  : command to run on server (default: ./build)
+
+Inventory:
+  grub_client can read host variables from an Ansible-compatible inventory.
+  Supported formats:
+    --inventory <file>   : Ansible inventory YAML (all.hosts.<server>.*)
+    host_vars/<server>.yml in the current directory (auto-discovered)
+
+Extra vars:
+  --extra-vars <file> passes a flat YAML key/value file to the remote build as
+  environment variables. Variables are set only for the build command and are
+  not visible client-side or during patch application.
+  Keys must be valid shell identifiers (letters, digits, underscores; no leading digit).
+  Example file:
+    MY_API_KEY: s3cr3t
+    BUILD_FLAGS: --release --verbose
+
+  Supported host variables:
+    ansible_host                 : remote hostname or IP (overrides SSH config HostName)
+    ansible_user                 : remote username (overrides SSH config User)
+    ansible_ssh_private_key_file : SSH key path (overrides SSH config IdentityFile)
+    grub_server_root             : equivalent to --server-root
+    grub_git_dir                 : equivalent to --git-dir
+
+  Priority: CLI args > inventory host vars > ~/.gitconfig cache > auto-detect defaults
+  ~/.ssh/config continues to work; inventory values are passed as SSH -o options.
 
 Examples:
   1. Build current directory repository (uses defaults):
@@ -47,7 +77,13 @@ Examples:
   5. Override git directory (for non-standard installations):
      grub_client --git-dir /opt/git/bin myserver
 
-  6. From VSCode (uses workspace folder automatically):
+  6. Use an Ansible inventory file:
+     grub_client --inventory ~/ansible/inventory.yml myzos
+
+  7. Auto-discover host_vars (place host_vars/myzos.yml in current directory):
+     grub_client myzos
+
+  8. From VSCode (uses workspace folder automatically):
      grub_client --repo-path \${workspaceFolder} myserver
 
 Environment Variables:
@@ -64,7 +100,6 @@ Notes:
   - Platform detection happens on the remote server
   - grub_client uses git and ssh to communicate with the remote server
   - ssh should be configured with public/private key authentication
-  - ssh Host specification must include at least HostName and User
   - grub_server script is automatically transferred to the remote server
 " >&2
 }
@@ -132,9 +167,14 @@ cleanup()
     rm -f "$patch_file" 2>/dev/null || true
   fi
 
+  # Clean up local env file if it exists
+  if [ -n "$local_env_file" ] && [ -f "$local_env_file" ]; then
+    rm -f "$local_env_file" 2>/dev/null || true
+  fi
+
   # Clean up remote patch file if it exists
   if [ -n "$server" ] && [ -n "$remote_patch_file" ]; then
-    ssh "${server}" "rm -f ${remote_patch_file}" 2>/dev/null || true
+    ssh $ssh_opts "${server}" "rm -f ${remote_patch_file}" 2>/dev/null || true
   fi
 
   # Clean up temporary branch if we made one
@@ -157,8 +197,10 @@ trap cleanup EXIT INT TERM
 verbose=False
 output=False
 repo_path=""
-server_root='~/dev'  # Default to ~/dev (will expand on remote)
-git_dir=""  # Will be auto-detected if not specified
+server_root=""  # Will be set from inventory or defaulted after server is known
+git_dir=""      # Will be auto-detected if not specified
+inventory_file=""
+extra_vars_file=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -192,6 +234,22 @@ while [[ $# -gt 0 ]]; do
         exit 4
       fi
       git_dir="$2"
+      shift 2
+      ;;
+    --inventory)
+      if [ -z "$2" ]; then
+        echo "Error: --inventory requires a file path" >&2
+        exit 4
+      fi
+      inventory_file="$2"
+      shift 2
+      ;;
+    -e|--extra-vars)
+      if [ -z "$2" ]; then
+        echo "Error: --extra-vars requires a file path" >&2
+        exit 4
+      fi
+      extra_vars_file="$2"
       shift 2
       ;;
     --clear-cache)
@@ -236,6 +294,77 @@ if [[ $# -lt 1 || $# -gt 2 ]]; then
   exit 4
 fi
 
+#
+# Load host variables from inventory (Ansible-compatible)
+#
+# Priority: CLI args > inventory host vars > ~/.gitconfig cache > auto-detect defaults
+# ~/.ssh/config continues to work; ansible_host/user/key are passed as SSH -o options.
+#
+
+ssh_opts=""  # Extra SSH options built from inventory; appended to all ssh/scp/git-push calls
+
+# Locate inventory source: --inventory flag takes precedence, then host_vars/<server>.yml
+_inv_value() {
+  # _inv_value <key>  — looks up key from whichever inventory source is active
+  if [ -n "$inventory_file" ]; then
+    grub_yaml_get_host "$inventory_file" "$server" "$1"
+  elif [ -f "host_vars/${server}.yml" ]; then
+    grub_yaml_get_flat "host_vars/${server}.yml" "$1"
+  fi
+}
+
+# ansible_host — remote hostname/IP
+_ansible_host=$(_inv_value ansible_host)
+if [ -n "$_ansible_host" ]; then
+  ssh_opts="$ssh_opts -o HostName=${_ansible_host}"
+  vecho "Inventory: ansible_host=${_ansible_host}"
+fi
+
+# ansible_user — remote username
+_ansible_user=$(_inv_value ansible_user)
+if [ -n "$_ansible_user" ]; then
+  ssh_opts="$ssh_opts -l ${_ansible_user}"
+  vecho "Inventory: ansible_user=${_ansible_user}"
+fi
+
+# ansible_ssh_private_key_file — SSH identity file
+_ansible_key=$(_inv_value ansible_ssh_private_key_file)
+if [ -n "$_ansible_key" ]; then
+  # Expand ~ manually since SSH -i doesn't expand it in all implementations
+  _ansible_key="${_ansible_key/#\~/$HOME}"
+  ssh_opts="$ssh_opts -i ${_ansible_key}"
+  vecho "Inventory: ansible_ssh_private_key_file=${_ansible_key}"
+fi
+
+# grub_server_root — only apply if not already set by CLI --server-root
+if [ -z "$server_root" ]; then
+  _inv_server_root=$(_inv_value grub_server_root)
+  if [ -n "$_inv_server_root" ]; then
+    server_root="$_inv_server_root"
+    vecho "Inventory: grub_server_root=${server_root}"
+  else
+    server_root='~/dev'
+    vecho "Using default server_root: ${server_root}"
+  fi
+else
+  vecho "Using CLI server_root: ${server_root}"
+fi
+
+# grub_git_dir — only apply if not already set by CLI --git-dir
+if [ -z "$git_dir" ]; then
+  _inv_git_dir=$(_inv_value grub_git_dir)
+  if [ -n "$_inv_git_dir" ]; then
+    git_dir="$_inv_git_dir"
+    vecho "Inventory: grub_git_dir=${git_dir}"
+  fi
+fi
+
+# Propagate ssh_opts to git's SSH invocations (git push uses its own SSH subprocess)
+if [ -n "$ssh_opts" ]; then
+  export GIT_SSH_COMMAND="ssh ${ssh_opts}"
+  vecho "GIT_SSH_COMMAND set: ${GIT_SSH_COMMAND}"
+fi
+
 # If git_dir not specified, detect it now (needed for git push configuration)
 if [ -z "$git_dir" ]; then
   # Try to get cached value first
@@ -247,7 +376,7 @@ if [ -z "$git_dir" ]; then
   else
     vecho "Auto-detecting git directory on remote server..."
     # Check if remote is z/OS
-    remote_uname=$(ssh "${server}" "uname -s" 2>/dev/null)
+    remote_uname=$(ssh $ssh_opts "${server}" "uname -s" 2>/dev/null)
     if echo "$remote_uname" | grep -qi "OS/390"; then
       git_dir="/usr/lpp/IBM/foz/v1r1/bin"
       vecho "Detected z/OS platform, using git_dir: $git_dir"
@@ -398,7 +527,7 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 # Use eval on remote to expand ~ in server_root
 vecho "Requested remote repository path: ${server_root}/${repo}"
 vecho "Remote setup git_dir: ${git_dir}"
-batch_result=$(cat "${script_dir}/grub_remote_setup" | ssh "${server}" "eval sh -s -- ${server_root}/${repo} '${git_dir}' '${run_id}'" 2>&1)
+batch_result=$(cat "${script_dir}/grub_remote_setup" | ssh $ssh_opts "${server}" "eval sh -s -- ${server_root}/${repo} '${git_dir}' '${run_id}'" 2>&1)
 
 batch_status=$?
 
@@ -480,7 +609,7 @@ if [ $batch_status -eq 0 ] && echo "$batch_result" | grep -qE "REPO_CLEANED|REPO
 
   # Clean working directory after push to ensure 100% clean state
   vecho "Finalizing remote repository state..."
-  ssh "${server}" "cd ${server_root}/${repo} && ${git_dir}/git reset --hard HEAD >/dev/null 2>&1 && ${git_dir}/git clean -fdx >/dev/null 2>&1" 2>/dev/null || true
+  ssh $ssh_opts "${server}" "cd ${server_root}/${repo} && ${git_dir}/git reset --hard HEAD >/dev/null 2>&1 && ${git_dir}/git clean -fdx >/dev/null 2>&1" 2>/dev/null || true
 else
   # Batched operation failed - fall back to individual operations
   vecho "Preparing remote repository (alternative method)..."
@@ -488,7 +617,7 @@ else
 
   # Fallback 1: Try to clean existing repository and configure compression + protocol v2
   vecho "Cleaning remote working directory..."
-  ssh "${server}" "cd ${server_root}/${repo} 2>/dev/null && ${git_dir}/git reset --hard HEAD >/dev/null 2>&1 && ${git_dir}/git clean -fdx >/dev/null 2>&1 && ${git_dir}/git config --local core.compression 6 && ${git_dir}/git config --local pack.compression 6 && ${git_dir}/git config --local protocol.version 2" 2>/dev/null || true
+  ssh $ssh_opts "${server}" "cd ${server_root}/${repo} 2>/dev/null && ${git_dir}/git reset --hard HEAD >/dev/null 2>&1 && ${git_dir}/git clean -fdx >/dev/null 2>&1 && ${git_dir}/git config --local core.compression 6 && ${git_dir}/git config --local pack.compression 6 && ${git_dir}/git config --local protocol.version 2" 2>/dev/null || true
 
   # Fallback 2: Try to push to remote (suppress errors if repo doesn't exist yet)
   echo "Synchronizing with remote server..." >&2
@@ -498,7 +627,7 @@ else
   if [ $? -gt 1 ]; then
     # Push failed - try to create repository with compression + protocol v2 configured
     vecho "Creating new repository ${repo} on ${server_root}..."
-    ssh "${server}" "mkdir -p ${server_root}/${repo} && cd ${server_root}/${repo} && ${git_dir}/git init && ${git_dir}/git config --local receive.denyCurrentBranch updateInstead && ${git_dir}/git config --local core.compression 6 && ${git_dir}/git config --local pack.compression 6 && ${git_dir}/git config --local protocol.version 2"
+    ssh $ssh_opts "${server}" "mkdir -p ${server_root}/${repo} && cd ${server_root}/${repo} && ${git_dir}/git init && ${git_dir}/git config --local receive.denyCurrentBranch updateInstead && ${git_dir}/git config --local core.compression 6 && ${git_dir}/git config --local pack.compression 6 && ${git_dir}/git config --local protocol.version 2"
     if [ $? -gt 0 ]; then
       echo "Error: Failed to push to remote repo: ${server}_${repo} and attempt to create repository on server failed." >&2
       reset_origin_url "${active_origin_url}"
@@ -519,7 +648,7 @@ else
 
   # Clean working directory after push to ensure 100% clean state
   vecho "Finalizing remote repository state..."
-  ssh "${server}" "cd ${server_root}/${repo} && ${git_dir}/git reset --hard HEAD >/dev/null 2>&1 && ${git_dir}/git clean -fdx >/dev/null 2>&1" 2>/dev/null || true
+  ssh $ssh_opts "${server}" "cd ${server_root}/${repo} && ${git_dir}/git reset --hard HEAD >/dev/null 2>&1 && ${git_dir}/git clean -fdx >/dev/null 2>&1" 2>/dev/null || true
 fi
 
 seconds_sync=$(date '+%s')
@@ -535,7 +664,7 @@ if [ $has_unstaged_changes -eq 1 ]; then
   # Use remote TMPDIR with unique run ID
   remote_patch_file="${remote_tmpdir}/grub.${local_user}_${server}_${repo}.${run_id}.patch"
 
-  scp -C -q "$patch_file" "${server}:${remote_patch_file}"
+  scp -C -q $ssh_opts "$patch_file" "${server}:${remote_patch_file}"
   if [ $? -gt 0 ]; then
     echo "Error: Failed to transfer patch file to server" >&2
     exit 4
@@ -546,6 +675,51 @@ fi
 seconds_transfer=$(date '+%s')
 
 vecho "Patch transfer complete:" $(date)
+
+# Process and transfer extra-vars file if specified
+remote_env_file=""
+local_env_file=""
+if [ -n "$extra_vars_file" ]; then
+  if [ ! -f "$extra_vars_file" ]; then
+    echo "Error: --extra-vars file not found: $extra_vars_file" >&2
+    exit 4
+  fi
+
+  local_env_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}.${run_id}.env"
+
+  # Parse YAML into shell export statements, validating keys as legal identifiers
+  parse_errors=0
+  while IFS= read -r pair; do
+    # pair is KEY='value' from grub_yaml_iter_flat
+    key="${pair%%=*}"
+    if ! echo "$key" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$'; then
+      echo "Error: --extra-vars: '$key' is not a valid shell identifier" >&2
+      parse_errors=$((parse_errors + 1))
+    else
+      echo "export $pair" >> "$local_env_file"
+    fi
+  done < <(grub_yaml_iter_flat "$extra_vars_file")
+
+  if [ $parse_errors -gt 0 ]; then
+    echo "Error: --extra-vars file contains $parse_errors invalid key(s)" >&2
+    exit 4
+  fi
+
+  if [ ! -s "$local_env_file" ]; then
+    vecho "Warning: --extra-vars file produced no variables, ignoring"
+    rm -f "$local_env_file"
+    local_env_file=""
+  else
+    remote_env_file="${remote_tmpdir}/grub.${local_user}_${server}_${repo}.${run_id}.env"
+    vecho "Transferring extra-vars env file to server"
+    scp -C -q $ssh_opts "$local_env_file" "${server}:${remote_env_file}"
+    if [ $? -gt 0 ]; then
+      echo "Error: Failed to transfer extra-vars file to server" >&2
+      exit 4
+    fi
+    vecho "Extra-vars file transferred to ${server}:${remote_env_file}"
+  fi
+fi
 
 # Note: Git cleanup (remote, branch, patch) will be handled by trap on exit
 
@@ -558,7 +732,7 @@ remote_output_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}.${run_
 # Shell-quote build_command so that spaces/special chars don't word-split when
 # SSH joins all arguments into a single remote shell command string.
 build_command_quoted=$(printf '%q' "${build_command}")
-cat "${client_dir}/grub_server" | ssh "${server}" /bin/sh -s - "${server_root}" "${repo}" "${git_dir}" "${build_command_quoted}" "${server}" "${has_unstaged_changes}" "${local_user}" "${active_branch}" "${remote_tmpdir}" "${run_id}" | tee "$remote_output_file"
+cat "${client_dir}/grub_server" | ssh $ssh_opts "${server}" /bin/sh -s - "${server_root}" "${repo}" "${git_dir}" "${build_command_quoted}" "${server}" "${has_unstaged_changes}" "${local_user}" "${active_branch}" "${remote_tmpdir}" "${run_id}" "${remote_env_file}" | tee "$remote_output_file"
 # Capture exit code of ssh command (middle of pipeline), not tee
 ssh_command_exit=${PIPESTATUS[1]}
 
@@ -591,9 +765,9 @@ vecho "Build complete:" $(date)
 # client_tmpdir already set and normalized above
 #
 vecho "Downloading build output files (via ssh+cat)..."
-ssh "${server}" "cat ${bld_out}" > "${client_tmpdir}/$(basename "${bld_out}")" 2>/dev/null &
+ssh $ssh_opts "${server}" "cat ${bld_out}" > "${client_tmpdir}/$(basename "${bld_out}")" 2>/dev/null &
 pid_out=$!
-ssh "${server}" "cat ${bld_err}" > "${client_tmpdir}/$(basename "${bld_err}")" 2>/dev/null &
+ssh $ssh_opts "${server}" "cat ${bld_err}" > "${client_tmpdir}/$(basename "${bld_err}")" 2>/dev/null &
 pid_err=$!
 wait ${pid_out} ${pid_err}
 rc=$?
@@ -603,7 +777,7 @@ if [ $rc -gt 0 ]; then
 else
   # Successfully downloaded - clean up remote log files
   vecho "Cleaning up remote log files..."
-  ssh "${server}" "rm -f ${bld_out} ${bld_err}" 2>/dev/null || true
+  ssh $ssh_opts "${server}" "rm -f ${bld_out} ${bld_err}" 2>/dev/null || true
 fi
 
 seconds_download=$(date '+%s')

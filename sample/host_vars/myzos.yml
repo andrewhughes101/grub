@@ -1,0 +1,15 @@
+# Sample host_vars file for an IBM z/OS UNIX server.
+# Place in host_vars/<server-name>.yml relative to your project directory,
+# or use --inventory <file> to point at an Ansible inventory.
+#
+# grub_client auto-discovers host_vars/<server>.yml in the current directory.
+# Values here take effect for any variable not already set by a CLI argument.
+
+# SSH connection (same keys as Ansible — shared with your Ansible inventory)
+ansible_host: zos.example.com
+ansible_user: myuser
+# ansible_ssh_private_key_file: ~/.ssh/id_zos   # optional; omit to use ~/.ssh/config key
+
+# GRUB-specific host variables
+grub_server_root: /u/myuser/projects
+grub_git_dir: /usr/lpp/IBM/foz/v1r1/bin

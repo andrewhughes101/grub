@@ -1,0 +1,21 @@
+# Sample Ansible inventory file.
+# Use with: grub_client --inventory inventory.yml <server>
+#
+# grub_client reads ansible_host, ansible_user, ansible_ssh_private_key_file
+# and the grub_* variables for the named host. All other keys are ignored.
+# This file can also be used directly with ansible-playbook for CI/CD.
+
+all:
+  hosts:
+    myzos:
+      ansible_host: zos.example.com
+      ansible_user: myuser
+      # ansible_ssh_private_key_file: ~/.ssh/id_zos
+      grub_server_root: /u/myuser/projects
+      grub_git_dir: /usr/lpp/IBM/foz/v1r1/bin
+
+    mylinux:
+      ansible_host: linux.example.com
+      ansible_user: devuser
+      grub_server_root: ~/dev
+      # grub_git_dir omitted — grub_client will auto-detect

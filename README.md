@@ -51,7 +51,7 @@ export PATH="$HOME/tools/grub/bin:$PATH"
 
 ### SSH Setup
 
-Configure SSH with public/private key authentication. Add to `~/.ssh/config`:
+Configure SSH with public/private key authentication. Either use `~/.ssh/config`:
 
 ```
 Host myserver
@@ -59,26 +59,43 @@ Host myserver
   User myusername
 ```
 
+Or define connection details in a `host_vars` file (see [Inventory Support](#inventory-support-optional) below) — no `~/.ssh/config` entry required when `ansible_host` and `ansible_user` are set.
+
 ### Usage
 
 ```bash
 cd /path/to/your/repo
-grub_client <server_root> <ssh_host> <git_path> [build_command]
+grub_client <server> [build_command]
 ```
 
 **Example:**
 ```bash
-grub_client /home/user/repos myserver /usr/bin ./build
+grub_client myserver ./build
 ```
 
 **With custom repo path:**
 ```bash
-grub_client --repo-path ~/projects/myapp /home/user/repos myserver /usr/bin make
+grub_client --repo-path ~/projects/myapp myserver make
 ```
 
 ## VSCode Integration (Optional)
 
-### 1. Create User Task
+### 1. Configure Settings
+
+Press `Cmd-Shift-P` → "Preferences: Open User Settings (JSON)" and add:
+
+```json
+{
+  "grub.server": "myserver",
+  "grub.client_build_tool": "/Users/you/tools/grub/bin/grub_client",
+  "grub.server_root": "/u/user/projects",
+  "grub.git_dir": "/opt/git/bin"
+}
+```
+
+`grub.server_root` and `grub.git_dir` are optional — omit them to use the defaults (`~/dev` and auto-detected platform path respectively).
+
+### 2. Create User Task
 
 Press `Cmd-Shift-P` → "Tasks: Open User Tasks" and add:
 
@@ -92,6 +109,8 @@ Press `Cmd-Shift-P` → "Tasks: Open User Tasks" and add:
       "command": "${config:grub.client_build_tool}",
       "args": [
         "--repo-path", "${workspaceFolder}",
+        "--server-root", "${config:grub.server_root}",
+        "--git-dir", "${config:grub.git_dir}",
         "${config:grub.server}"
       ],
       "group": {
@@ -103,26 +122,7 @@ Press `Cmd-Shift-P` → "Tasks: Open User Tasks" and add:
 }
 ```
 
-### 2. Configure Settings
-
-Press `Cmd-Shift-P` → "Preferences: Open User Settings (JSON)" and add:
-
-```json
-{
-  "grub.server": "myserver",
-  "grub.client_build_tool": "/Users/you/tools/grub/bin/grub_client"
-}
-```
-
-Optional settings (if you need to override defaults):
-```json
-{
-  "grub.server": "myserver",
-  "grub.client_build_tool": "/Users/you/tools/grub/bin/grub_client",
-  "grub.server_root": "/u/user/projects",
-  "grub.git_dir": "/opt/git/bin"
-}
-```
+Remove `--server-root` and `--git-dir` lines from `args` if you are not setting those in your VSCode settings.
 
 ### 3. Build
 
@@ -141,11 +141,93 @@ Options:
   --repo-path <path>         Repository path (default: current directory)
   --server-root <path>       Remote root directory (default: ~/dev)
   --git-dir <path>           Git directory on server (default: auto-detect)
+  --inventory <file>         Ansible inventory YAML file
+  -e, --extra-vars <file>    YAML file of variables to export as env vars during build
 
 Arguments:
-  server                     SSH host from ~/.ssh/config
+  server                     SSH host name (must match ~/.ssh/config Host or inventory host name)
   build_command              Command to run (default: ./build)
 ```
+
+## Inventory Support (Optional)
+
+GRUB can read host configuration from Ansible-compatible YAML files. This lets you share a single inventory between GRUB (local builds) and Ansible (CI/CD).
+
+### Option A — `host_vars/<server>.yml` (auto-discovered)
+
+Place a file named after your server in a `host_vars/` directory in your project:
+
+```yaml
+# host_vars/myzos.yml
+ansible_host: zos.example.com
+ansible_user: myuser
+# ansible_ssh_private_key_file: ~/.ssh/id_zos  # optional
+grub_server_root: /u/myuser/projects
+grub_git_dir: /usr/lpp/IBM/foz/v1r1/bin
+```
+
+```bash
+grub_client myzos          # picks up host_vars/myzos.yml automatically
+```
+
+### Option B — Ansible inventory file (`--inventory`)
+
+Use an existing Ansible inventory that covers multiple hosts:
+
+```yaml
+# inventory.yml
+all:
+  hosts:
+    myzos:
+      ansible_host: zos.example.com
+      ansible_user: myuser
+      grub_server_root: /u/myuser/projects
+      grub_git_dir: /usr/lpp/IBM/foz/v1r1/bin
+    mylinux:
+      ansible_host: linux.example.com
+      ansible_user: devuser
+```
+
+```bash
+grub_client --inventory ~/ansible/inventory.yml myzos
+```
+
+### Supported host variables
+
+| Variable | Equivalent to |
+|---|---|
+| `ansible_host` | SSH `HostName` |
+| `ansible_user` | SSH `User` |
+| `ansible_ssh_private_key_file` | SSH `IdentityFile` |
+| `grub_server_root` | `--server-root` |
+| `grub_git_dir` | `--git-dir` |
+
+**Priority:** CLI args > inventory values > auto-detect defaults. `~/.ssh/config` continues to work and is used as fallback for any SSH settings not specified in the inventory.
+
+See `sample/inventory.yml` and `sample/host_vars/myzos.yml` for templates.
+
+## Extra Vars (Optional)
+
+Pass a flat YAML file of key/value pairs to the remote build as environment variables:
+
+```bash
+grub_client -e build_vars.yml myserver
+```
+
+```yaml
+# build_vars.yml
+MY_API_KEY: s3cr3t
+BUILD_FLAGS: --release
+```
+
+Variables are exported into the build command's environment only. They are:
+- **Not visible client-side** — processed locally and transferred as a temp file
+- **Not stored in the repo** — the file is deleted from the remote immediately after sourcing
+- **Not applied during patch** — only active when your build script runs
+
+Keys must be valid shell identifiers (letters, digits, underscores; must not start with a digit).
+
+See `sample/build_vars.yml` for a template.
 
 ## Defaults
 
@@ -163,4 +245,3 @@ Arguments:
 
 - Git installed locally and on server
 - SSH with key-based authentication
-- Bash on server
