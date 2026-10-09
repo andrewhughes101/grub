@@ -1,0 +1,7 @@
+MY_API_KEY: s3cr3t
+BUILD_FLAGS: --release --verbose
+URL_VAR: https://example.com/path
+QUOTED_SINGLE: 'hello world'
+QUOTED_DOUBLE: "hello world"
+WITH_SINGLE_QUOTE: it's a value
+EMPTY_VAR:

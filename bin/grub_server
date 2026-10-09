@@ -15,6 +15,7 @@ local_user="$7"
 branch="$8"
 remote_tmpdir="$9"
 run_id="${10}"
+env_file="${11}"
 
 # Platform check to see if we're on z/OS
 uname_output=$(uname -s 2>/dev/null)
@@ -152,6 +153,12 @@ mkfifo "$pipe_out" "$pipe_err"
 # Start tee processes in background to read from pipes and write to files/terminal
 tee "${bld_out}" < "$pipe_out" &
 tee "${bld_err}" < "$pipe_err" >&2 &
+
+# Source extra-vars env file if provided, then delete it immediately
+if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+  . "$env_file"
+  rm -f "$env_file"
+fi
 
 # Run build command with output redirected to named pipes
 bash -c "$build_command" >"$pipe_out" 2>"$pipe_err"

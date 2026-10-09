@@ -1,0 +1,12 @@
+# Flat host_vars style fixture
+ansible_host: zos.example.com
+ansible_user: myuser
+ansible_ssh_private_key_file: ~/.ssh/id_zos
+grub_server_root: /u/myuser/projects
+grub_git_dir: /usr/lpp/IBM/foz/v1r1/bin
+empty_key:
+quoted_single: 'hello world'
+quoted_double: "hello world"
+url_value: https://example.com/path
+with_hash: value # inline comment
+with_single_quote: it's a value

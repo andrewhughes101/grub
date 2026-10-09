@@ -1,0 +1,12 @@
+# Sample extra-vars file for grub_client --extra-vars / -e
+# Use with: grub_client -e build_vars.yml myserver
+#
+# Variables defined here are set as environment variables on the remote server
+# for the duration of the build command only. They are never stored in the repo
+# or visible in client-side processes.
+#
+# Keys must be valid shell identifiers: letters, digits, underscores; no leading digit.
+
+MY_API_KEY: changeme
+BUILD_FLAGS: --release
+# OPTIONAL_SECRET: only_if_needed

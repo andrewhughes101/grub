@@ -7,6 +7,8 @@
       "command": "${config:grub.client_build_tool}",
       "args": [
         "--repo-path", "${workspaceFolder}",
+        "--server-root", "${config:grub.server_root}",
+        "--git-dir", "${config:grub.git_dir}",
         "${config:grub.server}"
       ],
       "group": {
