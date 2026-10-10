@@ -115,4 +115,18 @@ else
 fi
 rm -f "$_tf"
 
+# ---------------------------------------------------------------------------
+# Nested mappings handling
+# ---------------------------------------------------------------------------
+describe "env file: nested mapping produces empty parent and populated child vars"
+_tf=$(mktemp)
+printf 'parent_block:\n  child_var: child_value\n' > "$_tf"
+_env=$(build_env_file "$_tf")
+assert_not_empty "env file created for nested YAML" "$_env"
+# shellcheck disable=SC1090
+. "$_env"
+assert_empty "parent key is empty string" "$parent_block"
+assert_eq "child key is set to value" "child_value" "$child_var"
+rm -f "$_tf" "$_env"
+
 print_summary

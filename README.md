@@ -278,7 +278,7 @@ Variables are exported into the build command's environment only. They are:
 - **Not stored in the repo** — the file is deleted from the remote immediately after sourcing
 - **Not applied during patch** — only active when your build script runs
 
-Keys must be valid shell identifiers (letters, digits, underscores; must not start with a digit).
+Keys must be valid shell identifiers (letters, digits, underscores; must not start with a digit). Flat key/value pairs are recommended; if nested mappings are provided, line-by-line parsing flattens child keys directly while parent mapping keys receive empty values.
 
 See `sample/build_vars.yml` for a template.
 

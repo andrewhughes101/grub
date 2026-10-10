@@ -102,6 +102,7 @@ See `sample/inventory.yml` and `sample/host_vars/myzos.yml` for templates.
 `-e` / `--extra-vars <file>` passes a flat YAML key/value file to the remote build as environment variables.
 
 - Parsed client-side using `grub_yaml_iter_flat`; keys validated as legal shell identifiers
+- Flat key/value pairs are recommended; nested mappings are parsed line-by-line (parent key receives `''`, indented child key is exported directly)
 - Transformed into a `export KEY='value'` shell file and transferred via `scp` to the remote tmpdir
 - Tagged with `chtag -tc iso8859-1` on z/OS and sourced by `grub_server` immediately before `bash -c "$build_command"`, then deleted from the remote
 - Variables are scoped to the build command only — not visible client-side, not applied during patch
