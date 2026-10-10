@@ -110,6 +110,14 @@ assert_eq "eval QUOTED_SINGLE" "hello world" "$QUOTED_SINGLE"
 assert_eq "eval WITH_SINGLE_QUOTE" "it's a value" "$WITH_SINGLE_QUOTE"
 assert_empty "eval EMPTY_VAR" "$EMPTY_VAR"
 
+describe "grub_yaml_iter_flat: indented keys emit stripped key name and value"
+_tf=$(mktemp)
+printf 'root_key:\n  nested_key: value_nested\n' > "$_tf"
+_iter_out=$(grub_yaml_iter_flat "$_tf")
+assert_contains "parent key emitted empty" "root_key=''" "$_iter_out"
+assert_contains "nested key emitted directly" "nested_key='value_nested'" "$_iter_out"
+rm -f "$_tf"
+
 describe "grub_yaml_iter_flat: missing file returns non-zero"
 assert_exit_nonzero "missing file" grub_yaml_iter_flat /no/such/file.yml
 
