@@ -141,13 +141,54 @@ Options:
   --repo-path <path>         Repository path (default: current directory)
   --server-root <path>       Remote root directory (default: ~/dev)
   --git-dir <path>           Git directory on server (default: auto-detect)
-  --inventory <file>         Ansible inventory YAML file
+  -i, --inventory <file>     Ansible inventory YAML file
   -e, --extra-vars <file>    YAML file of variables to export as env vars during build
+  --no-multiplex             Disable OpenSSH connection multiplexing (ControlMaster)
+  --clear-cache <server>     Clear cached git directory and multiplex socket for server
 
 Arguments:
   server                     SSH host name (must match ~/.ssh/config Host or inventory host name)
   build_command              Command to run (default: ./build)
 ```
+
+## Passing Environment Variables to Build Commands
+
+You can pass environment variables to your remote build in multiple ways:
+
+### 1. Inline Command Variables
+Variables specified directly in the build command have the highest precedence:
+
+```bash
+grub_client myserver TEST=21 ./build
+# or with multiple variables
+grub_client myserver "FOO=bar BAZ=qux ./build"
+```
+
+### 2. Local Client Variables (Unquoted or Double-Quoted)
+When unquoted or in double quotes, your local shell expands `$VAR` before passing it to GRUB. GRUB safely quotes the value across SSH so special characters and spaces are preserved:
+
+```bash
+grub_client myserver RELEASE_TAG=$VERSION ./build
+# or
+grub_client myserver "API_KEY=$MY_LOCAL_TOKEN make test"
+```
+
+### 3. Remote Server Variables (Single-Quoted)
+When single-quoted, the literal variable reference is sent over SSH and evaluated on the remote server environment at runtime:
+
+```bash
+grub_client myserver 'PATH=$PATH:/opt/ibm/bin ./build'
+```
+
+### 4. Structured Files via `-e` / `--extra-vars`
+For passing multiple variables without command-line escaping, use a flat YAML file (see [Extra Vars](#extra-vars-optional) below).
+
+### Build Variable Precedence
+When the same environment variable is defined in multiple places for a build, the following precedence applies (highest to lowest):
+
+1. **Inline Command-Line Overrides** (e.g. `grub_client myserver TEST=21 ./build`) — takes precedence over everything
+2. **Extra Vars File** (`-e` / `--extra-vars <file>`) — exported into the build subshell environment
+3. **Remote Server Environment** — existing environment variables on the remote system
 
 ## Inventory Support (Optional)
 
@@ -170,7 +211,7 @@ grub_git_dir: /usr/lpp/IBM/foz/v1r1/bin
 grub_client myzos          # picks up host_vars/myzos.yml automatically
 ```
 
-### Option B — Ansible inventory file (`--inventory`)
+### Option B — Ansible inventory file (`-i` / `--inventory`)
 
 Use an existing Ansible inventory that covers multiple hosts:
 
@@ -189,6 +230,8 @@ all:
 ```
 
 ```bash
+grub_client -i ~/ansible/inventory.yml myzos
+# or
 grub_client --inventory ~/ansible/inventory.yml myzos
 ```
 
@@ -199,10 +242,20 @@ grub_client --inventory ~/ansible/inventory.yml myzos
 | `ansible_host` | SSH `HostName` |
 | `ansible_user` | SSH `User` |
 | `ansible_ssh_private_key_file` | SSH `IdentityFile` |
+| `ansible_port` | SSH `Port` |
+| `ansible_ssh_common_args` | Extra SSH options (e.g. `-o ProxyJump=...`) |
+| `grub_ssh_multiplex` | Set to `false` to disable `ControlMaster` |
 | `grub_server_root` | `--server-root` |
 | `grub_git_dir` | `--git-dir` |
 
-**Priority:** CLI args > inventory values > auto-detect defaults. `~/.ssh/config` continues to work and is used as fallback for any SSH settings not specified in the inventory.
+### Host and Connection Configuration Precedence
+Configuration settings are resolved in the following priority order (highest to lowest):
+
+1. **CLI Arguments** (`--server-root`, `--git-dir`, `--no-multiplex`)
+2. **Inventory / host_vars** (`-i <file>` or `host_vars/<server>.yml`)
+3. **Cached Git Config** (`~/.gitconfig` cached `git_dir` from prior auto-detection)
+4. **SSH Config** (`~/.ssh/config` fallback for hostname, user, identity, port)
+5. **Built-in Defaults** (`server_root="~/dev"`, auto-detected `git_dir`, `build_command="./build"`)
 
 See `sample/inventory.yml` and `sample/host_vars/myzos.yml` for templates.
 

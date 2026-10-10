@@ -5,17 +5,22 @@
 # for parameter passing from the client to the server
 #
 
-server_root="$1"
-repo="$2"
-git_dir="$3"
-build_command="$4"
-server_name="$5"
-has_unstaged_changes="$6"
-local_user="$7"
-branch="$8"
-remote_tmpdir="$9"
-run_id="${10}"
-env_file="${11}"
+server_root="$GRUB_SERVER_ROOT"
+repo="$GRUB_REPO"
+git_dir="$GRUB_GIT_DIR"
+build_command="$GRUB_BUILD_CMD"
+server_name="$GRUB_SERVER_NAME"
+has_unstaged_changes="$GRUB_HAS_PATCH"
+local_user="$GRUB_USER"
+branch="$GRUB_BRANCH"
+remote_tmpdir="$GRUB_REMOTE_TMPDIR"
+run_id="$GRUB_RUN_ID"
+env_file="$GRUB_ENV_FILE"
+# Expand ~ in server_root (prologue passes the literal string, shell won't expand ~ in assignments)
+case "$server_root" in
+  "~/"*) server_root="$HOME/${server_root#\~/}" ;;
+  "~")   server_root="$HOME" ;;
+esac
 
 # Platform check to see if we're on z/OS
 uname_output=$(uname -s 2>/dev/null)
@@ -156,6 +161,9 @@ tee "${bld_err}" < "$pipe_err" >&2 &
 
 # Source extra-vars env file if provided, then delete it immediately
 if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+  if [ "${zos}" = "True" ]; then
+    chtag -tc iso8859-1 "$env_file" 2>/dev/null || true
+  fi
   . "$env_file"
   rm -f "$env_file"
 fi

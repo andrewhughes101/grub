@@ -9,6 +9,9 @@
 ansible_host: zos.example.com
 ansible_user: myuser
 # ansible_ssh_private_key_file: ~/.ssh/id_zos   # optional; omit to use ~/.ssh/config key
+# ansible_port: 22                              # optional; custom SSH port
+# ansible_ssh_common_args: -o ProxyJump=jump.example.com # optional; proxy / jump host
+# grub_ssh_multiplex: true                      # optional; set to false to disable ControlMaster
 
 # GRUB-specific host variables
 grub_server_root: /u/myuser/projects

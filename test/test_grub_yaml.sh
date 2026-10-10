@@ -42,6 +42,12 @@ assert_eq "ansible_user" "myuser" "$(grub_yaml_get_flat "$FLAT" ansible_user)"
 describe "grub_yaml_get_flat: path with tilde"
 assert_eq "ssh key path" "~/.ssh/id_zos" "$(grub_yaml_get_flat "$FLAT" ansible_ssh_private_key_file)"
 
+describe "grub_yaml_get_flat: ansible_port"
+assert_eq "ssh port" "2022" "$(grub_yaml_get_flat "$FLAT" ansible_port)"
+
+describe "grub_yaml_get_flat: ansible_ssh_common_args"
+assert_eq "ssh common args" "-o ProxyJump=jump.example.com" "$(grub_yaml_get_flat "$FLAT" ansible_ssh_common_args)"
+
 describe "grub_yaml_get_flat: grub_server_root"
 assert_eq "server_root" "/u/myuser/projects" "$(grub_yaml_get_flat "$FLAT" grub_server_root)"
 
@@ -117,6 +123,12 @@ assert_eq "myzos host" "zos.example.com" "$(grub_yaml_get_host "$INV" myzos ansi
 
 describe "grub_yaml_get_host: myzos ansible_user"
 assert_eq "myzos user" "zosuser" "$(grub_yaml_get_host "$INV" myzos ansible_user)"
+
+describe "grub_yaml_get_host: myzos ansible_port"
+assert_eq "myzos port" "2022" "$(grub_yaml_get_host "$INV" myzos ansible_port)"
+
+describe "grub_yaml_get_host: myzos ansible_ssh_common_args"
+assert_eq "myzos common args" "-o ProxyJump=jump.example.com" "$(grub_yaml_get_host "$INV" myzos ansible_ssh_common_args)"
 
 describe "grub_yaml_get_host: myzos grub_server_root"
 assert_eq "myzos server_root" "/u/zosuser/projects" "$(grub_yaml_get_host "$INV" myzos grub_server_root)"
