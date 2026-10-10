@@ -22,11 +22,12 @@ Neither `grub_server` nor `grub_remote_setup` is installed on the remote — the
 ## How It Works
 
 1. Creates a patch of all local changes (staged, unstaged, untracked) via `git diff HEAD`
-2. Pushes committed changes to the remote via `git push --force` over SSH
-3. Transfers the patch file via `scp -C`
-4. Runs `grub_server` on the remote: applies the patch, then executes the build command
-5. Streams build output live, then downloads stdout/stderr log files via `ssh cat`
-6. Cleans up all temp files, the added git remote, and any temporary branch on exit via `trap`
+2. Runs `grub_remote_setup` over SSH to prepare/clean remote repo and check if remote HEAD matches local HEAD
+3. Pushes committed changes to the remote via `git push --force` over SSH (skipped if remote HEAD and branch already match)
+4. Transfers the patch file via `scp -C` (if uncommitted changes exist)
+5. Runs `grub_server` on the remote: applies the patch, then executes the build command
+6. Streams build output live, then downloads stdout/stderr log files via `ssh cat`
+7. Cleans up all temp files, the added git remote, and any temporary branch on exit via `trap`
 
 ## Scripting Language Constraints
 
@@ -68,12 +69,12 @@ The patch includes untracked files that are **not** gitignored (`git ls-files --
 
 `grub_client` can load host configuration from Ansible-compatible YAML files. No Ansible installation is required — `grub_yaml` parses the files using pure `sh`, `awk`, and `sed`.
 
-**Resolution order:** CLI args > inventory host vars > `~/.gitconfig` cache > auto-detect defaults.
+**Host resolution order:** CLI args > inventory host vars > `~/.gitconfig` cache > `~/.ssh/config` > auto-detect defaults.
 
 Two formats are supported:
 
 - **`host_vars/<server>.yml`** — flat key/value file, auto-discovered in the current directory
-- **`--inventory <file>`** — Ansible inventory YAML (`all.hosts.<server>.*` structure)
+- **`-i` / `--inventory <file>`** — Ansible inventory YAML (`all.hosts.<server>.*` structure)
 
 Supported variables:
 
@@ -82,24 +83,34 @@ Supported variables:
 | `ansible_host` | Passed as `ssh -o HostName=` |
 | `ansible_user` | Passed as `ssh -l` |
 | `ansible_ssh_private_key_file` | Passed as `ssh -i` (~ expanded) |
+| `ansible_port` | Passed as `ssh -o Port=` |
+| `ansible_ssh_common_args` | Appended to SSH options (e.g. ProxyJump) |
+| `grub_ssh_multiplex` | Set to `false` to disable OpenSSH `ControlMaster` |
 | `grub_server_root` | Sets `server_root` if not given via CLI |
 | `grub_git_dir` | Sets `git_dir` if not given via CLI |
 
-When any of the SSH vars are present, `GIT_SSH_COMMAND` is also exported so that `git push` uses the same connection options.
+When any of the SSH vars or multiplexing options are present, `GIT_SSH_COMMAND` is also exported so that `git push` uses the exact same connection options.
+
+OpenSSH connection multiplexing (`ControlMaster=auto`, `ControlPersist=600`) is enabled by default so all SSH, SCP, and Git push operations share a single connection without repeated handshakes.
 
 `~/.ssh/config` continues to work and is used as fallback for anything not specified in the inventory.
 
 See `sample/inventory.yml` and `sample/host_vars/myzos.yml` for templates.
 
-## Extra Vars
+## Extra Vars & Build Variable Precedence
 
 `-e` / `--extra-vars <file>` passes a flat YAML key/value file to the remote build as environment variables.
 
 - Parsed client-side using `grub_yaml_iter_flat`; keys validated as legal shell identifiers
 - Transformed into a `export KEY='value'` shell file and transferred via `scp` to the remote tmpdir
-- Sourced by `grub_server` immediately before `bash -c "$build_command"`, then deleted from the remote
+- Tagged with `chtag -tc iso8859-1` on z/OS and sourced by `grub_server` immediately before `bash -c "$build_command"`, then deleted from the remote
 - Variables are scoped to the build command only — not visible client-side, not applied during patch
 - `sample/build_vars.yml` is a template
+
+**Build Variable Precedence:**
+1. Inline command-line variable assignments (e.g. `grub_client myserver TEST=21 ./build`)
+2. `--extra-vars` / `-e <file>` exported environment variables
+3. Remote server pre-existing environment variables
 
 ## VSCode Settings Keys
 
@@ -126,6 +137,9 @@ test/
   lib/assert.sh         # assert_eq, assert_empty, assert_contains, assert_exit helpers
   test_grub_yaml.sh     # Tests for all grub_yaml functions
   test_extra_vars.sh    # Tests for --extra-vars key validation and env file generation
+  test_remote_setup.sh  # Tests for grub_remote_setup repo init, cleanup, and push cache
+  test_cli_args.sh      # Tests for grub_client CLI option handling, exit codes, and precedence
+  test_patch.sh         # Tests for patch generation and application (untracked, unstaged, staged)
   fixtures/             # YAML input files used by tests
 ```
 
@@ -136,11 +150,11 @@ sh test/run_tests.sh
 
 Run a single file:
 ```bash
-sh test/run_tests.sh test/test_grub_yaml.sh
+sh test/run_tests.sh test/test_cli_args.sh
 ```
 
 Tests run automatically on every push and pull request to `main` via `.github/workflows/test.yml`.
 
-**What is tested:** `grub_yaml` functions (all four), `--extra-vars` key validation, env file generation, and eval-safety of generated output.
+**What is tested:** `grub_yaml` functions (all four), `--extra-vars` key validation, env file generation, eval-safety of generated output, `grub_remote_setup` repository lifecycle (init, compression, cleanup, push cache, and `.gitattributes` change detection), `grub_client` CLI argument parsing, option precedence, and error exit codes, and diff patch generation/application across staged, unstaged, and untracked files.
 
-**What is not tested:** Anything requiring SSH or git — `grub_client` orchestration, `grub_server`, `grub_remote_setup`. These require integration tests against a real or mock remote server, which is a known future gap.
+**What is not tested:** End-to-end SSH orchestration — full `grub_client` and `grub_server` execution across real network connections.

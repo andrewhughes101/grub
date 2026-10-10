@@ -27,9 +27,10 @@ Options:
   --repo-path <path>          : path to repository (default: current directory)
   --server-root <path>        : remote root directory (default: ~/dev)
   --git-dir <path>            : git directory on server (default: auto-detect by platform)
-  --inventory <file>          : Ansible inventory file to read host variables from
+  -i | --inventory <file>     : Ansible inventory file to read host variables from
   -e | --extra-vars <file>    : YAML file of variables to set as env vars during build
-  --clear-cache <server>      : clear cached git directory for specified server
+  --no-multiplex              : disable SSH connection multiplexing (ControlMaster)
+  --clear-cache <server>      : clear cached git directory and multiplex socket for server
 
 Arguments:
   server         : ssh host specification (name must match host in inventory or ~/.ssh/config)
@@ -38,11 +39,11 @@ Arguments:
 Inventory:
   grub_client can read host variables from an Ansible-compatible inventory.
   Supported formats:
-    --inventory <file>   : Ansible inventory YAML (all.hosts.<server>.*)
+    -i | --inventory <file> : Ansible inventory YAML (all.hosts.<server>.*)
     host_vars/<server>.yml in the current directory (auto-discovered)
 
 Extra vars:
-  --extra-vars <file> passes a flat YAML key/value file to the remote build as
+  -e | --extra-vars <file> passes a flat YAML key/value file to the remote build as
   environment variables. Variables are set only for the build command and are
   not visible client-side or during patch application.
   Keys must be valid shell identifiers (letters, digits, underscores; no leading digit).
@@ -54,11 +55,15 @@ Extra vars:
     ansible_host                 : remote hostname or IP (overrides SSH config HostName)
     ansible_user                 : remote username (overrides SSH config User)
     ansible_ssh_private_key_file : SSH key path (overrides SSH config IdentityFile)
+    ansible_port                 : remote SSH port (overrides SSH config Port)
+    ansible_ssh_common_args      : additional SSH options (e.g. -o ProxyJump=...)
+    grub_ssh_multiplex           : set to false to disable SSH connection multiplexing
     grub_server_root             : equivalent to --server-root
     grub_git_dir                 : equivalent to --git-dir
 
-  Priority: CLI args > inventory host vars > ~/.gitconfig cache > auto-detect defaults
-  ~/.ssh/config continues to work; inventory values are passed as SSH -o options.
+  Precedence:
+    Host/SSH config : CLI args > inventory host vars > ~/.gitconfig cache > ~/.ssh/config > auto-detect defaults
+    Build variables : inline command args (e.g. VAR=val ./build) > --extra-vars YAML file > remote shell env
 
 Examples:
   1. Build current directory repository (uses defaults):
@@ -86,9 +91,23 @@ Examples:
   8. From VSCode (uses workspace folder automatically):
      grub_client --repo-path \${workspaceFolder} myserver
 
+  9. Pass local environment variable to build command:
+     grub_client myserver RELEASE_TAG=\$VERSION ./build
+
+  10. Evaluate remote environment variable on server:
+     grub_client myserver 'PATH=\$PATH:/opt/tools/bin ./build'
+
 Environment Variables:
   TMPDIR : temporary directory for local files (default: /tmp)
            Remote server also honors TMPDIR for its temporary files
+
+Environment Variables in Build Commands:
+  - Local client variables: unquoted or double-quoted references (e.g. ARG=\$LOCAL_VAR)
+    are expanded by your local shell before being passed to grub_client.
+  - Remote server variables: single-quoted references (e.g. 'PATH=\$PATH:/opt/bin ./build')
+    are preserved literally and evaluated on the remote server at runtime.
+  - Structured variables: use -e / --extra-vars <file> to securely export key/value pairs
+    into the remote build environment.
 
 Defaults:
   - server_root: ~/dev (expands to remote user's home directory)
@@ -201,8 +220,18 @@ server_root=""  # Will be set from inventory or defaulted after server is known
 git_dir=""      # Will be auto-detected if not specified
 inventory_file=""
 extra_vars_file=""
+no_multiplex=False
+server=""
+build_command_parts=()
 
 while [[ $# -gt 0 ]]; do
+  # If a build command has already started, all remaining args belong to the build command
+  if [ ${#build_command_parts[@]} -gt 0 ]; then
+    build_command_parts+=("$1")
+    shift
+    continue
+  fi
+
   case "$1" in
     -v|--verbose)
       verbose=True
@@ -212,8 +241,12 @@ while [[ $# -gt 0 ]]; do
       output=True
       shift
       ;;
+    --no-multiplex)
+      no_multiplex=True
+      shift
+      ;;
     --repo-path)
-      if [ -z "$2" ]; then
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
         echo "Error: --repo-path requires a path argument" >&2
         exit 4
       fi
@@ -221,7 +254,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --server-root)
-      if [ -z "$2" ]; then
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
         echo "Error: --server-root requires a path argument" >&2
         exit 4
       fi
@@ -229,35 +262,46 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --git-dir)
-      if [ -z "$2" ]; then
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
         echo "Error: --git-dir requires a path argument" >&2
         exit 4
       fi
       git_dir="$2"
       shift 2
       ;;
-    --inventory)
-      if [ -z "$2" ]; then
+    -i|--inventory)
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
         echo "Error: --inventory requires a file path" >&2
+        exit 4
+      fi
+      if [ ! -f "$2" ]; then
+        echo "Error: --inventory file not found: $2" >&2
         exit 4
       fi
       inventory_file="$2"
       shift 2
       ;;
     -e|--extra-vars)
-      if [ -z "$2" ]; then
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
         echo "Error: --extra-vars requires a file path" >&2
+        exit 4
+      fi
+      if [ ! -f "$2" ]; then
+        echo "Error: --extra-vars file not found: $2" >&2
         exit 4
       fi
       extra_vars_file="$2"
       shift 2
       ;;
     --clear-cache)
-      if [ -z "$2" ]; then
+      if [ -z "$2" ] || [[ "$2" == -* ]]; then
         echo "Error: --clear-cache requires a server name" >&2
         exit 4
       fi
       git config --global --unset "grub.$2.gitdir" 2>/dev/null
+      _cc_user=$(whoami)
+      ssh -O exit -o "ControlPath=/tmp/grub_mux_${_cc_user}_$2.sock" "$2" 2>/dev/null || true
+      rm -f "/tmp/grub_mux_${_cc_user}_$2.sock" 2>/dev/null || true
       echo "Cache cleared for server: $2"
       exit 0
       ;;
@@ -269,30 +313,47 @@ while [[ $# -gt 0 ]]; do
       echo "grub_client version $VERSION"
       exit 0
       ;;
+    --)
+      shift
+      if [ -z "$server" ] && [ $# -gt 0 ]; then
+        server="$1"
+        shift
+      fi
+      while [[ $# -gt 0 ]]; do
+        build_command_parts+=("$1")
+        shift
+      done
+      break
+      ;;
     -*)
       echo "Error: Unknown option: $1" >&2
       syntax
       exit 4
       ;;
     *)
-      # First non-option argument, stop parsing options
-      break
+      if [ -z "$server" ]; then
+        server="$1"
+      else
+        build_command_parts+=("$1")
+      fi
+      shift
       ;;
   esac
 done
 
-# Parse positional arguments
-server=$1
-build_command=${2:-'./build'}
-
-vecho "Remaining arguments after option parsing: $#"
-vecho "Server: $server"
-vecho "Build command: $build_command"
-
-if [[ $# -lt 1 || $# -gt 2 ]]; then
+if [ -z "$server" ]; then
   syntax
   exit 4
 fi
+
+if [ ${#build_command_parts[@]} -gt 0 ]; then
+  build_command="${build_command_parts[*]}"
+else
+  build_command="./build"
+fi
+
+vecho "Server: $server"
+vecho "Build command: $build_command"
 
 #
 # Load host variables from inventory (Ansible-compatible)
@@ -300,6 +361,10 @@ fi
 # Priority: CLI args > inventory host vars > ~/.gitconfig cache > auto-detect defaults
 # ~/.ssh/config continues to work; ansible_host/user/key are passed as SSH -o options.
 #
+
+client_tmpdir="${TMPDIR:-/tmp}"
+client_tmpdir="${client_tmpdir%/}"
+local_user=$(whoami)
 
 ssh_opts=""  # Extra SSH options built from inventory; appended to all ssh/scp/git-push calls
 
@@ -323,7 +388,7 @@ fi
 # ansible_user — remote username
 _ansible_user=$(_inv_value ansible_user)
 if [ -n "$_ansible_user" ]; then
-  ssh_opts="$ssh_opts -l ${_ansible_user}"
+  ssh_opts="$ssh_opts -o User=${_ansible_user}"
   vecho "Inventory: ansible_user=${_ansible_user}"
 fi
 
@@ -335,6 +400,23 @@ if [ -n "$_ansible_key" ]; then
   ssh_opts="$ssh_opts -i ${_ansible_key}"
   vecho "Inventory: ansible_ssh_private_key_file=${_ansible_key}"
 fi
+
+# ansible_port — remote SSH port
+_ansible_port=$(_inv_value ansible_port)
+if [ -n "$_ansible_port" ]; then
+  ssh_opts="$ssh_opts -o Port=${_ansible_port}"
+  vecho "Inventory: ansible_port=${_ansible_port}"
+fi
+
+# ansible_ssh_common_args — extra SSH arguments (ProxyJump, etc.)
+_ansible_common_args=$(_inv_value ansible_ssh_common_args)
+if [ -n "$_ansible_common_args" ]; then
+  ssh_opts="$ssh_opts ${_ansible_common_args}"
+  vecho "Inventory: ansible_ssh_common_args=${_ansible_common_args}"
+fi
+
+# grub_ssh_multiplex — allow disabling SSH multiplexing via inventory
+_inv_multiplex=$(_inv_value grub_ssh_multiplex)
 
 # grub_server_root — only apply if not already set by CLI --server-root
 if [ -z "$server_root" ]; then
@@ -357,6 +439,16 @@ if [ -z "$git_dir" ]; then
     git_dir="$_inv_git_dir"
     vecho "Inventory: grub_git_dir=${git_dir}"
   fi
+fi
+
+# SSH connection multiplexing (ControlMaster): share single SSH connection across all operations
+# The socket path must stay under the OS limit for Unix domain sockets (~104 chars on macOS).
+# $TMPDIR on macOS expands to a long /var/folders/… path, so use /tmp unconditionally for the
+# socket file; /tmp is a symlink to /private/tmp on macOS and is always short.
+if [ "$no_multiplex" != "True" ] && [ "$_inv_multiplex" != "false" ] && [ "$_inv_multiplex" != "False" ]; then
+  mux_socket="/tmp/grub_mux_${local_user}_${server}.sock"
+  ssh_opts="-o ControlMaster=auto -o ControlPath=${mux_socket} -o ControlPersist=600 $ssh_opts"
+  vecho "SSH multiplexing enabled (socket: ${mux_socket})"
 fi
 
 # Propagate ssh_opts to git's SSH invocations (git push uses its own SSH subprocess)
@@ -451,12 +543,14 @@ else
   fi
 fi
 
+local_commit=$(git rev-parse HEAD 2>/dev/null)
+local_gitattr_hash=$(git hash-object .gitattributes 2>/dev/null)
+local_gitattr_hash="${local_gitattr_hash:-none}"
+vecho "Local HEAD commit: $local_commit"
+vecho "Local .gitattributes hash: $local_gitattr_hash"
+vecho "Active branch: $active_branch"
+
 # Check if there are unstaged changes and create a patch file if needed
-# Remove trailing slash from TMPDIR if present
-client_tmpdir="${TMPDIR:-/tmp}"
-client_tmpdir="${client_tmpdir%/}"
-# Include username in filename to prevent clashes between users
-local_user=$(whoami)
 patch_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}.${run_id}.patch"
 has_unstaged_changes=0
 
@@ -475,16 +569,13 @@ else
   # 2. Staged changes
   # 3. Untracked files
   {
-    # First, output diff for tracked files (staged and unstaged)
-    git diff HEAD
+    # First, output diff for tracked files (staged and unstaged) with standard prefixes
+    git diff --src-prefix=a/ --dst-prefix=b/ --no-color HEAD
 
-    # Add untracked files as new file patches
+    # Add untracked files as new file patches with standard prefixes
     git ls-files --others --exclude-standard | while read -r file; do
-      # Use git diff to generate proper patch format for new files
-      # git apply expects: --- /dev/null and +++ b/filename for new files
-      git diff --no-index --no-color /dev/null "$file" 2>/dev/null | \
-        sed "1s|^--- /dev/null|--- /dev/null|" | \
-        sed "2s|^+++ $file|+++ b/$file|" || true
+      [ -f "$file" ] || continue
+      git diff --no-index --src-prefix=a/ --dst-prefix=b/ --no-color /dev/null "$file" 2>/dev/null || true
     done
   } > "$patch_file"
 
@@ -519,19 +610,17 @@ echo "Preparing remote repository..." >&2
 
 # Batch SSH operations: clean existing repo OR create new one in single call
 
-# Get the directory where this script is located
-script_dir="$(cd "$(dirname "$0")" && pwd)"
-
 # Execute the remote setup script via SSH
-# Pass run_id to remote setup so it can use the same identifier
+# Pass run_id, local_commit, active_branch, and local_gitattr_hash to remote setup
 # Use eval on remote to expand ~ in server_root
 vecho "Requested remote repository path: ${server_root}/${repo}"
 vecho "Remote setup git_dir: ${git_dir}"
-batch_result=$(cat "${script_dir}/grub_remote_setup" | ssh $ssh_opts "${server}" "eval sh -s -- ${server_root}/${repo} '${git_dir}' '${run_id}'" 2>&1)
+batch_result=$(cat "${SCRIPT_DIR}/grub_remote_setup" | ssh $ssh_opts "${server}" "eval sh -s -- ${server_root}/${repo} '${git_dir}' '${run_id}' '${local_commit}' '${active_branch}' '${local_gitattr_hash}'" 2>&1)
 
 batch_status=$?
 
 # Extract values from the remote setup output
+push_needed=$(echo "$batch_result" | grep "^PUSH_NEEDED=" | cut -d= -f2)
 remote_tmpdir=$(echo "$batch_result" | grep "^REMOTE_TMPDIR=" | cut -d= -f2)
 remote_tmpdir=${remote_tmpdir:-/tmp}
 expanded_server_root=$(echo "$batch_result" | grep "^EXPANDED_PATH=" | cut -d= -f2)
@@ -586,9 +675,11 @@ if [ "${receivepack}" = '' ]; then
 fi
 
 # Check if batched operation succeeded
-if [ $batch_status -eq 0 ] && echo "$batch_result" | grep -qE "REPO_CLEANED|REPO_CREATED"; then
+if [ $batch_status -eq 0 ] && echo "$batch_result" | grep -qE "REPO_CLEANED|REPO_CREATED|REPO_RECREATED"; then
   # Golden path succeeded!
-  if echo "$batch_result" | grep -q "REPO_CLEANED_CONFIGURED"; then
+  if echo "$batch_result" | grep -q "REPO_RECREATED"; then
+    vecho ".gitattributes changed: remote repository recreated to refresh encoding tags"
+  elif echo "$batch_result" | grep -q "REPO_CLEANED_CONFIGURED"; then
     vecho "Repository cleaned and configured on server (batched operation)"
   elif echo "$batch_result" | grep -q "REPO_CLEANED"; then
     vecho "Repository cleaned on server (config already set - fast path)"
@@ -596,20 +687,20 @@ if [ $batch_status -eq 0 ] && echo "$batch_result" | grep -qE "REPO_CLEANED|REPO
     vecho "Repository created on server (batched operation)"
   fi
 
-  # Try to push to remote
-  echo "Synchronizing with remote server..." >&2
-  push_to_remote "${server}_${repo}" $DETACHED "$DETACHED_BRANCH_NAME"
-  push_status=$?
+  # Push to remote only if needed (e.g. commit or branch changed, or new repo)
+  if [ "$push_needed" = "0" ]; then
+    vecho "Remote commit matches local HEAD ($local_commit). Skipping git push."
+  else
+    echo "Synchronizing with remote server..." >&2
+    push_to_remote "${server}_${repo}" $DETACHED "$DETACHED_BRANCH_NAME"
+    push_status=$?
 
-  if [ $push_status -gt 0 ]; then
-    echo "Error: Unable to push to ${server}_${repo} after successful repository preparation." >&2
-    reset_origin_url "${active_origin_url}"
-    exit 4
+    if [ $push_status -gt 0 ]; then
+      echo "Error: Unable to push to ${server}_${repo} after successful repository preparation." >&2
+      reset_origin_url "${active_origin_url}"
+      exit 4
+    fi
   fi
-
-  # Clean working directory after push to ensure 100% clean state
-  vecho "Finalizing remote repository state..."
-  ssh $ssh_opts "${server}" "cd ${server_root}/${repo} && ${git_dir}/git reset --hard HEAD >/dev/null 2>&1 && ${git_dir}/git clean -fdx >/dev/null 2>&1" 2>/dev/null || true
 else
   # Batched operation failed - fall back to individual operations
   vecho "Preparing remote repository (alternative method)..."
@@ -723,16 +814,34 @@ fi
 
 # Note: Git cleanup (remote, branch, patch) will be handled by trap on exit
 
-client_dir="$(dirname "$(realpath "$0")")"
-
 # Execute grub_server - stream output to terminal and capture to temp file
 # Pass has_unstaged_changes flag to server
 remote_output_file="${client_tmpdir}/grub_${local_user}_${server}_${repo}.${run_id}_remote.out"
 
-# Shell-quote build_command so that spaces/special chars don't word-split when
-# SSH joins all arguments into a single remote shell command string.
-build_command_quoted=$(printf '%q' "${build_command}")
-cat "${client_dir}/grub_server" | ssh $ssh_opts "${server}" /bin/sh -s - "${server_root}" "${repo}" "${git_dir}" "${build_command_quoted}" "${server}" "${has_unstaged_changes}" "${local_user}" "${active_branch}" "${remote_tmpdir}" "${run_id}" "${remote_env_file}" | tee "$remote_output_file"
+# Prepend a variable-assignment prologue to grub_server so arguments are passed as
+# environment variables rather than positional parameters. SSH concatenates all
+# post-hostname words into one shell string before the remote sh parses it, so
+# positional args containing spaces (e.g. "TEST=21 ./build") get word-split and
+# shift every subsequent $N. Variables are immune to that problem.
+# Each value is single-quote-escaped so the prologue is safe to inline into the
+# remote shell command string.
+_q() { printf '%s' "$1" | sed "s/'/'\\''/g; s/^/'/; s/$/'/" ; }
+prologue=$(printf '%s\n' \
+  "GRUB_SERVER_ROOT=$(_q "${server_root}")" \
+  "GRUB_REPO=$(_q "${repo}")" \
+  "GRUB_GIT_DIR=$(_q "${git_dir}")" \
+  "GRUB_BUILD_CMD=$(_q "${build_command}")" \
+  "GRUB_SERVER_NAME=$(_q "${server}")" \
+  "GRUB_HAS_PATCH=${has_unstaged_changes}" \
+  "GRUB_USER=$(_q "${local_user}")" \
+  "GRUB_BRANCH=$(_q "${active_branch}")" \
+  "GRUB_REMOTE_TMPDIR=$(_q "${remote_tmpdir}")" \
+  "GRUB_RUN_ID=$(_q "${run_id}")" \
+  "GRUB_ENV_FILE=$(_q "${remote_env_file}")" \
+)
+{ printf '%s\n' "$prologue"; cat "${SCRIPT_DIR}/grub_server"; } \
+  | ssh $ssh_opts "${server}" /bin/sh \
+  | tee "$remote_output_file"
 # Capture exit code of ssh command (middle of pipeline), not tee
 ssh_command_exit=${PIPESTATUS[1]}
 
