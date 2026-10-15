@@ -9,9 +9,9 @@ GRUB_ROOT="$(dirname "$SCRIPT_DIR")"
 . "${SCRIPT_DIR}/grub_yaml"
 GIT_HASH=$(cd "$GRUB_ROOT" && git rev-parse --short=7 HEAD 2>/dev/null)
 if [ -n "$GIT_HASH" ]; then
-  VERSION="0.2.5+${GIT_HASH}"
+  VERSION="0.3.0+${GIT_HASH}"
 else
-  VERSION="0.2.5"
+  VERSION="0.3.0"
 fi
 
 syntax()
